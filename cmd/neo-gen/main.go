@@ -319,7 +319,7 @@ func generate(pkg string, procedures []procedure) ([]byte, error) {
 	b.WriteString("import (\n")
 	b.WriteString("\t\"context\"\n")
 	b.WriteString("\n")
-	b.WriteString("\tneo \"neo\"\n")
+	b.WriteString("\tneo \"github.com/Protocol-Lattice/neo\"\n")
 	b.WriteString(")\n\n")
 
 	groups := groupProcedures(procedures)

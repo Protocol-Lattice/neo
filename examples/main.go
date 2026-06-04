@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"time"
 
-	neo "neo"
+	neo "github.com/Protocol-Lattice/neo"
 )
 
 type NoInput struct{}

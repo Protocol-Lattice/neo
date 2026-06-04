@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 
-	neo "neo"
+	neo "github.com/Protocol-Lattice/neo"
 )
 
 type TypedClient struct {
