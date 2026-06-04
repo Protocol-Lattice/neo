@@ -47,7 +47,10 @@ jobs:
       - name: Check go mod tidy
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum
+          if ! git diff --exit-code; then
+            echo "go mod tidy produced changes. Run 'go mod tidy' and commit the result."
+            exit 1
+          fi
 
       - name: Vet
         run: go vet ./...
