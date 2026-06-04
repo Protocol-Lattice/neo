@@ -1,8 +1,13 @@
 {
   "type": "module",
   "scripts": {
+    "check": "node --experimental-transform-types --check client.ts",
     "client": "node --experimental-transform-types client.ts",
-    "gen": "go run ../../cmd/neo-gen -dir . -out ./neo.gen.ts -target ts",
-    "server": "go run ."
+    "gen": "go run ../../cmd/neo-gen -dir . -out ./neo.runtime.ts -target ts-runtime && go run ../../cmd/neo-gen -dir . -out ./neo.gen.ts -target ts",
+    "server": "go run .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
   }
 }

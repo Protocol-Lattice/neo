@@ -32,6 +32,7 @@ npm run client
 Regenerate the TypeScript client from the Go server in this directory:
 
 ```bash
+go run ./cmd/neo-gen -dir ./examples/ts_client -out ./examples/ts_client/neo.runtime.ts -target ts-runtime
 go run ./cmd/neo-gen -dir ./examples/ts_client -out ./examples/ts_client/neo.gen.ts -target ts
 ```
 
@@ -40,6 +41,24 @@ From inside `examples/ts_client`, the equivalent command is:
 ```bash
 npm run gen
 ```
+
+Check the TypeScript syntax with Node:
+
+```bash
+npm run check
+```
+
+For full TypeScript type checking, install dependencies once and run:
+
+```bash
+npm install
+npm run typecheck
+```
+
+The generated client sends custom headers on `fetch` calls, including queries,
+mutations, and NDJSON subscriptions. Browser WebSocket constructors do not
+allow custom request headers, so WebSocket auth should use cookies or a
+server-issued token encoded in the subscription input or URL.
 
 The client calls `healthcheck`, reads `user.getByID`, opens a `user.changes`
 NDJSON subscription, creates a user through `user.create`, and receives the

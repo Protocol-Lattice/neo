@@ -258,7 +258,9 @@ func register(root, user Router) {
 		t.Fatalf("scanPackage returned error: %v", err)
 	}
 
-	src, err := generateTypeScript(scan.Procedures, scan.Types)
+	src, err := generateTypeScript(scan.Procedures, scan.Types, typeScriptOptions{
+		RuntimeImport: "./neo.runtime.ts",
+	})
 	if err != nil {
 		t.Fatalf("generateTypeScript returned error: %v", err)
 	}
@@ -276,7 +278,9 @@ func register(root, user Router) {
 		t.Fatalf("generated source should not include json-ignored field\n--- source ---\n%s", text)
 	}
 	assertContains(t, text, "attributes: Record<string, unknown>;")
-	assertContains(t, text, "export class TypedClient {")
+	assertContains(t, text, `import { NeoClientCore, type NeoCallOptions, type NeoClientOptions } from "./neo.runtime.ts";`)
+	assertContains(t, text, `export { NeoError } from "./neo.runtime.ts";`)
+	assertContains(t, text, "export class TypedClient extends NeoClientCore {")
 	assertContains(t, text, "readonly user: UserClient;")
 	assertContains(t, text, "readonly health: HealthProcedure;")
 	assertContains(t, text, "export function createClient(addr: string, options?: NeoClientOptions): TypedClient")
@@ -285,6 +289,73 @@ func register(root, user Router) {
 	assertContains(t, text, `return this.client.request<CreateInput, User>("POST", "user.create", input, options);`)
 	assertContains(t, text, `return this.client.subscribe<NoInput, User>("user.changes", input, options);`)
 	assertContains(t, text, `return this.client.subscribeWebSocket<NoInput, User>("user.changes", input, options);`)
+}
+
+func TestGenerateTypeScriptHandlesExternalTypesAndNameCollisions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.go", `package example
+
+type ExternalInput struct {
+	ID    uuid.UUID             `+"`json:\"id\"`"+`
+	Page  domain.Page[api.User] `+"`json:\"page\"`"+`
+	Owner api.User              `+"`json:\"owner\"`"+`
+}
+type User struct {
+	Owner api.User `+"`json:\"owner\"`"+`
+}
+
+func register(root Router) {
+	root.Register("user.get-id", neo.Query[ExternalInput, domain.Page[api.User]]())
+	root.Register("user.get_id", neo.Query[ExternalInput, domain.Page[api.User]]())
+}
+`)
+
+	scan, err := scanPackage(dir)
+	if err != nil {
+		t.Fatalf("scanPackage returned error: %v", err)
+	}
+
+	src, err := generateTypeScript(scan.Procedures, scan.Types, typeScriptOptions{
+		RuntimeImport: "./neo.runtime.ts",
+	})
+	if err != nil {
+		t.Fatalf("generateTypeScript returned error: %v", err)
+	}
+	text := string(src)
+
+	assertContains(t, text, "export type ApiUser = unknown;")
+	assertContains(t, text, "export type DomainPage<T1 = unknown> = unknown;")
+	assertContains(t, text, "export type UuidUUID = unknown;")
+	assertContains(t, text, "id: UuidUUID;")
+	assertContains(t, text, "page: DomainPage<ApiUser>;")
+	assertContains(t, text, "owner: ApiUser;")
+	assertContains(t, text, "readonly getId: UserGetIdProcedure;")
+	assertContains(t, text, "readonly getId2: UserGetIdProcedure2;")
+	assertContains(t, text, `return this.client.request<ExternalInput, DomainPage<ApiUser>>("GET", "user.get-id", input, options);`)
+	assertContains(t, text, `return this.client.request<ExternalInput, DomainPage<ApiUser>>("GET", "user.get_id", input, options);`)
+}
+
+func TestExamplesTypeScriptClientGeneratedFilesAreCurrent(t *testing.T) {
+	exampleDir := filepath.Clean("../../examples/ts_client")
+
+	scan, err := scanPackage(exampleDir)
+	if err != nil {
+		t.Fatalf("scanPackage examples/ts_client: %v", err)
+	}
+
+	runtime, err := generateTypeScriptRuntime()
+	if err != nil {
+		t.Fatalf("generateTypeScriptRuntime returned error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(exampleDir, "neo.runtime.ts"), string(runtime))
+
+	client, err := generateTypeScript(scan.Procedures, scan.Types, typeScriptOptions{
+		RuntimeImport: "./neo.runtime.ts",
+	})
+	if err != nil {
+		t.Fatalf("generateTypeScript returned error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(exampleDir, "neo.gen.ts"), string(client))
 }
 
 func parseCall(t *testing.T, src string) *ast.CallExpr {
@@ -318,5 +389,16 @@ func assertContains(t *testing.T, text, want string) {
 	t.Helper()
 	if !strings.Contains(text, want) {
 		t.Fatalf("generated source missing %q\n--- source ---\n%s", want, text)
+	}
+}
+
+func assertFileContent(t *testing.T, path string, want string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if got := string(raw); got != want {
+		t.Fatalf("%s is not current; regenerate it with neo-gen", path)
 	}
 }

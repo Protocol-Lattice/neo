@@ -724,6 +724,7 @@ go run ./cmd/neo-gen -dir ./examples -out ./examples/neo.gen.go
 Generate a TypeScript client:
 
 ```bash
+go run ./cmd/neo-gen -dir ./examples/ts_client -out ./examples/ts_client/neo.runtime.ts -target ts-runtime
 go run ./cmd/neo-gen -dir ./examples/ts_client -out ./examples/ts_client/neo.gen.ts -target ts
 ```
 
@@ -828,6 +829,15 @@ for await (const event of client.user.changes.subscribeWebSocket({})) {
 
 See `examples/ts_client` for a runnable Go server plus TypeScript client use case.
 
+The default TypeScript target imports the shared runtime from `./neo.runtime.ts`.
+Use `-target ts-runtime` to generate that runtime file, or `-target ts-standalone`
+if you want one self-contained generated client file.
+
+Custom headers are sent for `fetch` calls: queries, mutations, and NDJSON
+subscriptions. Browser WebSocket constructors do not support custom request
+headers, so WebSocket auth should use cookies or a server-issued token encoded
+in the subscription input or URL.
+
 Current codegen gives you:
 
 - generated Go client namespaces
@@ -840,6 +850,8 @@ Current codegen gives you:
 - generated TypeScript local interfaces from Go structs and JSON tags
 - typed TypeScript query, mutation, NDJSON subscription, and WebSocket subscription helpers
 - TypeScript client options for custom headers, custom `fetch`, and custom `WebSocket`
+- reusable generated TypeScript runtime via `-target ts-runtime`
+- named TypeScript placeholders for imported Go selector types that Neo cannot inspect locally
 
 Future codegen goals:
 
