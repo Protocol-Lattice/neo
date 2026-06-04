@@ -89,37 +89,42 @@ func TestProcedureTypedErrorMapsToStatusAndCode(t *testing.T) {
 
 func TestPlainErrorDefaultsToInternal(t *testing.T) {
 	router := NewRouter()
-	router.Register("boom", Query[testInput, testOutput](func(ctx context.Context, in testInput) (testOutput, error) {
+	router.Register("boom", Query(func(ctx context.Context, input testInput) (testOutput, error) {
 		return testOutput{}, errors.New("kaboom")
 	}))
 
-	server := newTestServer(router)
-	defer server.Close()
+	req := httptest.NewRequest(http.MethodGet, "/neo/boom", nil)
+	rec := httptest.NewRecorder()
 
-	res, err := http.Get(server.URL + "/neo/boom")
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", res.StatusCode)
+
+	var got Response
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
-	var body Response
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
+
+	if got.Code != string(CodeInternal) || got.Error != internalErrorMessage {
+		t.Fatalf("body = %#v, want INTERNAL/%q", got, internalErrorMessage)
 	}
-	if body.Code != string(CodeInternal) || body.Error != "kaboom" {
-		t.Fatalf("body = %#v, want INTERNAL/kaboom", body)
+
+	if strings.Contains(rec.Body.String(), "kaboom") {
+		t.Fatalf("internal error detail leaked: %s", rec.Body.String())
 	}
 }
 
 func TestMethodEnforcement(t *testing.T) {
 	router := NewRouter()
 	router.Register("q", Query[testInput, testOutput](func(ctx context.Context, in testInput) (testOutput, error) {
-		return testOutput{}, nil
+		return testOutput{Message: "query ok"}, nil
 	}))
 	router.Register("m", Mutation[testInput, testOutput](func(ctx context.Context, in testInput) (testOutput, error) {
-		return testOutput{}, nil
+		return testOutput{Message: "mutation ok"}, nil
 	}))
 
 	server := newTestServer(router)
@@ -131,24 +136,33 @@ func TestMethodEnforcement(t *testing.T) {
 		t.Fatalf("GET mutation: %v", err)
 	}
 	res.Body.Close()
+
 	if res.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("mutation-over-GET status = %d, want 405", res.StatusCode)
 	}
-	if allow := res.Header.Get("Allow"); allow != http.MethodPost {
-		t.Fatalf("Allow = %q, want POST", allow)
+
+	if allow := res.Header.Get("Allow"); allow != "POST, OPTIONS" {
+		t.Fatalf("Allow = %q, want POST, OPTIONS", allow)
 	}
 
-	// Query over POST is rejected.
+	// Query over POST is allowed so large query inputs can avoid URL length limits.
 	res, err = http.Post(server.URL+"/neo/q", "application/json", strings.NewReader(`{"input":{}}`))
 	if err != nil {
 		t.Fatalf("POST query: %v", err)
 	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("query-over-POST status = %d, want 405", res.StatusCode)
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("query-over-POST status = %d, want 200", res.StatusCode)
 	}
-	if allow := res.Header.Get("Allow"); allow != http.MethodGet {
-		t.Fatalf("Allow = %q, want GET", allow)
+
+	var got Response
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got.Error != "" || got.Code != "" {
+		t.Fatalf("unexpected error response: %#v", got)
 	}
 }
 

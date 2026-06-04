@@ -3,7 +3,9 @@ package neo
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 )
 
 // ErrorCode is a transport-agnostic, machine-readable error classifier.
@@ -94,9 +96,20 @@ func (e *Error) Unwrap() error {
 	return e.cause
 }
 
-// asError normalizes any error into an *Error, defaulting unknown errors to
-// CodeInternal with their original message.
-func asError(err error) *Error {
+// ErrorLogger receives full internal errors before a redacted response is sent.
+// Replace it in tests or applications that already use structured logging.
+var ErrorLogger interface{ Printf(string, ...any) } = log.New(os.Stderr, "neo: ", log.LstdFlags)
+
+const internalErrorMessage = "internal server error"
+
+type normalizedError struct {
+	error    *Error
+	explicit bool
+}
+
+// asError normalizes any error into an *Error. Plain Go errors are internal
+// implementation failures and must not leak their messages to clients.
+func asError(err error) normalizedError {
 	var e *Error
 	if errors.As(err, &e) {
 		code := e.Code
@@ -105,18 +118,58 @@ func asError(err error) *Error {
 		}
 		message := e.Message
 		if message == "" {
-			message = err.Error()
+			message = code.defaultMessage()
 		}
-		return &Error{Code: code, Message: message, cause: e.cause}
+		return normalizedError{error: &Error{Code: code, Message: message, cause: e.cause}, explicit: true}
 	}
-	return &Error{Code: CodeInternal, Message: err.Error()}
+	return normalizedError{error: &Error{Code: CodeInternal, Message: internalErrorMessage, cause: err}}
+}
+
+func (c ErrorCode) defaultMessage() string {
+	switch c {
+	case CodeBadRequest:
+		return "bad request"
+	case CodeUnauthorized:
+		return "unauthorized"
+	case CodeForbidden:
+		return "forbidden"
+	case CodeNotFound:
+		return "not found"
+	case CodeMethodNotAllowed:
+		return "method not allowed"
+	case CodeConflict:
+		return "conflict"
+	case CodeTooManyRequests:
+		return "too many requests"
+	case CodeNotImplemented:
+		return "not implemented"
+	case CodeUnavailable:
+		return "unavailable"
+	case CodeTimeout:
+		return "timeout"
+	default:
+		return internalErrorMessage
+	}
 }
 
 // writeProcedureError serializes an error to the wire with the right HTTP
-// status and a machine-readable code.
+// status and a machine-readable code. Internal failures are logged with their
+// original detail but are redacted on the wire.
 func writeProcedureError(w http.ResponseWriter, err error) {
-	e := asError(err)
-	writeJSON(w, e.Code.HTTPStatus(), Response{Code: string(e.Code), Error: e.Message})
+	n := asError(err)
+	e := n.error
+	message := e.Message
+
+	if e.Code == CodeInternal {
+		if ErrorLogger != nil {
+			ErrorLogger.Printf("internal procedure error: %v", err)
+		}
+		message = internalErrorMessage
+	} else if !n.explicit {
+		message = e.Code.defaultMessage()
+	}
+
+	writeJSON(w, e.Code.HTTPStatus(), Response{Code: string(e.Code), Error: message})
 }
 
 // responseError reconstructs a typed *Error from a decoded Response so clients

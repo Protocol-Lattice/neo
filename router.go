@@ -6,6 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
+)
+
+const (
+	DefaultAddr           = ":8080"
+	DefaultPrefix         = "/neo/"
+	DefaultMaxRequestBody = 1 << 20 // 1 MiB
 )
 
 // Router maps procedure keys to handlers and serves them over HTTP.
@@ -31,6 +38,15 @@ type Router struct {
 	metadata                map[string]ProcedureMeta
 }
 
+type ServerOptions struct {
+	Addr           string
+	Prefix         string
+	ReadTimeout    time.Duration
+	WriteTimeout   time.Duration
+	IdleTimeout    time.Duration
+	MaxRequestBody int64
+}
+
 func NewRouter() *Router {
 	return &Router{
 		procedures:              make(map[string]*Procedure[any, any, any]),
@@ -40,6 +56,28 @@ func NewRouter() *Router {
 		events:                  NewEventBus(),
 		metadata:                make(map[string]ProcedureMeta),
 	}
+}
+
+func (opts ServerOptions) withDefaults() ServerOptions {
+	if opts.Addr == "" {
+		opts.Addr = DefaultAddr
+	}
+	if opts.Prefix == "" {
+		opts.Prefix = DefaultPrefix
+	}
+	if opts.ReadTimeout == 0 {
+		opts.ReadTimeout = 5 * time.Second
+	}
+	if opts.WriteTimeout == 0 {
+		opts.WriteTimeout = 10 * time.Second
+	}
+	if opts.IdleTimeout == 0 {
+		opts.IdleTimeout = 60 * time.Second
+	}
+	if opts.MaxRequestBody == 0 {
+		opts.MaxRequestBody = DefaultMaxRequestBody
+	}
+	return opts
 }
 
 // Use appends global middleware. It must be called before the procedures it
@@ -169,14 +207,31 @@ func (router *Router) Nested(prefix string, nested *Router) {
 	}
 }
 
-func (router *Router) Serve() {
+// Serve starts a hardened HTTP server on :8080 using the default /neo/ prefix.
+func (router *Router) Serve() error {
+	return router.ListenAndServe(ServerOptions{})
+}
+
+// ListenAndServe starts a hardened HTTP server with configurable address,
+// prefix, timeouts, and maximum request-body size.
+func (router *Router) ListenAndServe(opts ServerOptions) error {
+	opts = opts.withDefaults()
+
 	mux := http.NewServeMux()
+	router.ServeHTTP(mux, opts.Prefix)
 
-	router.ServeHTTP(mux, "/neo/")
-
-	if err := http.ListenAndServe(":8080", mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		panic(err)
+	server := &http.Server{
+		Addr:         opts.Addr,
+		Handler:      http.MaxBytesHandler(mux, opts.MaxRequestBody),
+		ReadTimeout:  opts.ReadTimeout,
+		WriteTimeout: opts.WriteTimeout,
+		IdleTimeout:  opts.IdleTimeout,
 	}
+
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
@@ -185,6 +240,13 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 	prefix = "/" + strings.Trim(prefix, "/") + "/"
 
 	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		writeCORSHeaders(w, r)
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Allow", "GET, HEAD, POST, OPTIONS")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		key := strings.TrimPrefix(r.URL.Path, prefix)
 		key = strings.Trim(key, "/")
 
@@ -199,8 +261,8 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 			return
 		}
 
-		if want, enforced := expectedMethod(procedure.Kind); enforced && r.Method != want {
-			w.Header().Set("Allow", want)
+		if want, enforced := expectedMethod(procedure.Kind); enforced && !methodMatches(r.Method, want) {
+			w.Header().Set("Allow", allowedMethods(want))
 			writeProcedureError(w, Errorf(CodeMethodNotAllowed, "%s requires %s", procedure.Kind, want))
 			return
 		}
@@ -229,7 +291,7 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 
 func (router *Router) serveSubscription(w http.ResponseWriter, r *http.Request, key string, subscription *SubscriptionProcedure[any, any, any]) {
 	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+		w.Header().Set("Allow", "GET, OPTIONS")
 		writeProcedureError(w, NewError(CodeMethodNotAllowed, "subscriptions require GET"))
 		return
 	}
@@ -304,6 +366,34 @@ func expectedMethod(kind ProcedureKind) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func methodMatches(got, want string) bool {
+	if got == want {
+		return true
+	}
+	if want == http.MethodGet {
+		return got == http.MethodHead || got == http.MethodPost
+	}
+	return false
+}
+
+func allowedMethods(want string) string {
+	if want == http.MethodGet {
+		return "GET, HEAD, POST, OPTIONS"
+	}
+	return want + ", OPTIONS"
+}
+
+func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Vary", "Origin")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
 }
 
 func cloneMiddlewares(middlewares []Middleware) []Middleware {

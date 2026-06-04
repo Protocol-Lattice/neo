@@ -21,7 +21,7 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func readInput(r *http.Request) (any, error) {
 	switch r.Method {
-	case http.MethodGet:
+	case http.MethodGet, http.MethodHead:
 		rawInput := r.URL.Query().Get("input")
 		if rawInput == "" {
 			return nil, nil

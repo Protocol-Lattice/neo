@@ -35,6 +35,8 @@ type Request struct {
 	Input any `json:"input"`
 }
 
+const maxGETInputBytes = 6 << 10
+
 type Response struct {
 	Result any    `json:"result,omitempty"`
 	Code   string `json:"code,omitempty"`
@@ -236,6 +238,16 @@ func (client *Client) newRequest(ctx context.Context, method string, key string,
 			rawInput, err := json.Marshal(input)
 			if err != nil {
 				return nil, fmt.Errorf("marshal query input: %w", err)
+			}
+
+			if len(rawInput) > maxGETInputBytes {
+				rawBody, err := json.Marshal(Request{Input: input})
+				if err != nil {
+					return nil, fmt.Errorf("marshal query body: %w", err)
+				}
+				method = http.MethodPost
+				body = bytes.NewReader(rawBody)
+				break
 			}
 
 			endpoint += "?input=" + url.QueryEscape(string(rawInput))

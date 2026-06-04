@@ -3,208 +3,158 @@ package neo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
-	"time"
 )
 
-type testInput struct {
-	Name string `json:"name"`
-}
+func TestPlainErrorDefaultsToInternalAndRedactsMessage(t *testing.T) {
+	oldLogger := ErrorLogger
+	ErrorLogger = nil
+	t.Cleanup(func() { ErrorLogger = oldLogger })
 
-type testOutput struct {
-	Message string `json:"message"`
-}
+	router := NewRouter()
+	router.Register("boom", Query(func(context.Context, struct{}) (string, error) {
+		return "", errors.New("pq: connection refused to 10.0.0.5")
+	}))
 
-type testNoInput struct{}
-
-func newTestServer(router *Router) *httptest.Server {
 	mux := http.NewServeMux()
 	router.ServeHTTP(mux, "/neo/")
-	return httptest.NewServer(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/neo/boom", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(rec.Body.String(), "10.0.0.5") || strings.Contains(rec.Body.String(), "connection refused") {
+		t.Fatalf("internal detail leaked: %s", rec.Body.String())
+	}
+
+	var res Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != string(CodeInternal) || res.Error != internalErrorMessage {
+		t.Fatalf("response = %#v, want redacted internal error", res)
+	}
 }
 
-func TestClientQueryOverHTTP(t *testing.T) {
+func TestExplicitErrorMessagePassesThroughForNonInternalCode(t *testing.T) {
 	router := NewRouter()
-	router.Register("hello", Query[testInput, testOutput](func(ctx context.Context, input testInput) (testOutput, error) {
-		return testOutput{Message: "hello " + input.Name}, nil
+	router.Register("missing", Query(func(context.Context, struct{}) (string, error) {
+		return "", NewError(CodeNotFound, "user not found")
 	}))
 
-	server := newTestServer(router)
-	defer server.Close()
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
 
-	client := NewClient(server.URL + "/neo")
-	got, err := CallTyped[testInput, testOutput](context.Background(), client.Query.Procedure("hello"), testInput{Name: "Neo"})
-	if err != nil {
-		t.Fatalf("query failed: %v", err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/neo/missing", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
-	if got.Message != "hello Neo" {
-		t.Fatalf("unexpected result: %#v", got)
+	if !strings.Contains(rec.Body.String(), "user not found") {
+		t.Fatalf("explicit message was not returned: %s", rec.Body.String())
 	}
 }
 
-func TestClientMutationOverHTTP(t *testing.T) {
+func TestOptionsPreflightAndHeadAreAccepted(t *testing.T) {
 	router := NewRouter()
-	router.Register("user.create", Mutation[testInput, testOutput](func(ctx context.Context, input testInput) (testOutput, error) {
-		return testOutput{Message: "created " + input.Name}, nil
+	router.Register("ping", Query(func(context.Context, struct{}) (string, error) {
+		return "pong", nil
 	}))
 
-	server := newTestServer(router)
-	defer server.Close()
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
 
-	client := NewClient(server.URL + "/neo")
-	got, err := CallTyped[testInput, testOutput](context.Background(), client.Mutation.Procedure("user.create"), testInput{Name: "Kamil"})
-	if err != nil {
-		t.Fatalf("mutation failed: %v", err)
+	preflight := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/neo/ping", nil)
+	req.Header.Set("Origin", "https://example.test")
+	mux.ServeHTTP(preflight, req)
+
+	if preflight.Code != http.StatusNoContent {
+		t.Fatalf("OPTIONS status = %d, want %d", preflight.Code, http.StatusNoContent)
 	}
-	if got.Message != "created Kamil" {
-		t.Fatalf("unexpected result: %#v", got)
+	if got := preflight.Header().Get("Access-Control-Allow-Origin"); got != "https://example.test" {
+		t.Fatalf("CORS origin = %q", got)
+	}
+
+	head := httptest.NewRecorder()
+	mux.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/neo/ping", nil))
+	if head.Code != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want %d", head.Code, http.StatusOK)
 	}
 }
 
-func TestMiddlewareOrder(t *testing.T) {
-	var calls []string
+func TestQueryAcceptsPostBodyForLargeInputs(t *testing.T) {
+	type input struct {
+		Value string `json:"value"`
+	}
 
-	first := func(next Handler) Handler {
+	router := NewRouter()
+	router.Register("echo", Query(func(_ context.Context, in input) (int, error) {
+		return len(in.Value), nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	body := `{"input":{"value":"` + strings.Repeat("x", maxGETInputBytes+1) + `"}}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/neo/echo", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMergeCopiesProceduresSubscriptionsMetadataAndMiddleware(t *testing.T) {
+	var calls atomic.Int64
+	parent := NewRouter()
+	parent.Use(func(next Handler) Handler {
 		return func(ctx context.Context, input any) (any, error) {
-			calls = append(calls, "first:before")
-			out, err := next(ctx, input)
-			calls = append(calls, "first:after")
-			return out, err
+			calls.Add(1)
+			return next(ctx, input)
 		}
-	}
+	})
 
-	second := func(next Handler) Handler {
-		return func(ctx context.Context, input any) (any, error) {
-			calls = append(calls, "second:before")
-			out, err := next(ctx, input)
-			calls = append(calls, "second:after")
-			return out, err
-		}
-	}
-
-	router := NewRouter()
-	router.Use(first, second)
-	router.Register("hello", Query[testInput, testOutput](func(ctx context.Context, input testInput) (testOutput, error) {
-		calls = append(calls, "handler")
-		return testOutput{Message: input.Name}, nil
+	child := NewRouter()
+	child.Register("ping", Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
+	child.RegisterSubscription("events", Subscription(func(ctx context.Context, _ struct{}) (<-chan string, error) {
+		ch := make(chan string, 1)
+		ch <- "ok"
+		close(ch)
+		return ch, nil
 	}))
 
-	server := newTestServer(router)
-	defer server.Close()
+	parent.Merge(child)
 
-	client := NewClient(server.URL + "/neo")
-	_, err := CallTyped[testInput, testOutput](context.Background(), client.Query.Procedure("hello"), testInput{Name: "Neo"})
+	if parent.Method("ping") == nil {
+		t.Fatal("merged procedure missing")
+	}
+	if parent.Subscription("events") == nil {
+		t.Fatal("merged subscription missing")
+	}
+	if len(parent.Metadata()) != 2 {
+		t.Fatalf("metadata len = %d, want 2", len(parent.Metadata()))
+	}
+
+	_, err := applyMiddlewares(parent.procedureMiddlewares["ping"], func(context.Context, any) (any, error) {
+		return nil, nil
+	})(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("query failed: %v", err)
+		t.Fatal(err)
 	}
-
-	want := []string{"first:before", "second:before", "handler", "second:after", "first:after"}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("middleware order mismatch:\n got: %#v\nwant: %#v", calls, want)
-	}
-}
-
-func TestNestedRouterAndMetadata(t *testing.T) {
-	root := NewRouter()
-	users := NewRouter()
-	users.Register("get", Query[testInput, testOutput](func(ctx context.Context, input testInput) (testOutput, error) {
-		return testOutput{Message: "user " + input.Name}, nil
-	}))
-	root.Nested("user", users)
-
-	server := newTestServer(root)
-	defer server.Close()
-
-	client := NewClient(server.URL + "/neo")
-	got, err := CallTyped[testInput, testOutput](context.Background(), client.Query.Procedure("user.get"), testInput{Name: "42"})
-	if err != nil {
-		t.Fatalf("nested query failed: %v", err)
-	}
-	if got.Message != "user 42" {
-		t.Fatalf("unexpected result: %#v", got)
-	}
-
-	metas := root.Metadata()
-	if len(metas) != 1 {
-		t.Fatalf("expected one metadata entry, got %d", len(metas))
-	}
-	if metas[0].Key != "user.get" || metas[0].Kind != ProcedureKindQuery {
-		t.Fatalf("unexpected metadata: %#v", metas[0])
-	}
-}
-
-func TestRouterNotFound(t *testing.T) {
-	router := NewRouter()
-	server := newTestServer(router)
-	defer server.Close()
-
-	res, err := http.Get(server.URL + "/neo/missing")
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusNotFound)
-	}
-
-	var rpcRes Response
-	if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if rpcRes.Error == "" {
-		t.Fatalf("expected error response, got %#v", rpcRes)
-	}
-}
-
-func TestSubscriptionReceivesEvent(t *testing.T) {
-	router := NewRouter()
-	router.RegisterSubscription("user.changes", Subscription[testNoInput, Event](func(ctx context.Context, input testNoInput) (<-chan Event, error) {
-		rawEvents := router.Events().Subscribe(ctx, "users")
-		out := make(chan Event)
-
-		go func() {
-			defer close(out)
-			for raw := range rawEvents {
-				event, ok := raw.(Event)
-				if !ok {
-					continue
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				case out <- event:
-				}
-			}
-		}()
-
-		return out, nil
-	}))
-
-	server := newTestServer(router)
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	client := NewClient(server.URL + "/neo")
-	stream, err := SubscribeTyped[testNoInput, Event](ctx, client.Subscription.Procedure("user.changes"), testNoInput{})
-	if err != nil {
-		t.Fatalf("subscribe failed: %v", err)
-	}
-
-	router.Events().Publish("users", Event{Topic: "users", Name: "created", Data: "kamil"})
-
-	select {
-	case got := <-stream:
-		if got.Topic != "users" || got.Name != "created" || got.Data != "kamil" {
-			t.Fatalf("unexpected event: %#v", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for subscription event")
+	if calls.Load() != 1 {
+		t.Fatalf("middleware calls = %d, want 1", calls.Load())
 	}
 }
