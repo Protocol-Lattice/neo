@@ -1,0 +1,8 @@
+{
+  "type": "module",
+  "scripts": {
+    "client": "node --experimental-transform-types client.ts",
+    "gen": "go run ../../cmd/neo-gen -dir . -out ./neo.gen.ts -target ts",
+    "server": "go run ."
+  }
+}

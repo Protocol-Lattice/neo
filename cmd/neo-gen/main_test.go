@@ -224,6 +224,69 @@ func TestGenerateProducesTypedClientForGroupedRootAndSubscriptionProcedures(t *t
 	assertContains(t, text, `neo.SubscribeTyped[EventInput, Event](ctx, p.client.Subscription.Procedure("events.updates"), input)`)
 }
 
+func TestGenerateTypeScriptProducesTypedClientAndLocalTypes(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.go", `package example
+
+type NoInput struct{}
+type CreateInput struct {
+	Name      string          `+"`json:\"name\"`"+`
+	Age       int             `+"`json:\"age,omitempty\"`"+`
+	CreatedAt time.Time       `+"`json:\"createdAt\"`"+`
+	Tags      []string        `+"`json:\"tags\"`"+`
+	Maybe     *User           `+"`json:\"maybe,omitempty\"`"+`
+	Raw       json.RawMessage `+"`json:\"raw,omitempty\"`"+`
+	Secret    string          `+"`json:\"-\"`"+`
+}
+type User struct {
+	ID         int            `+"`json:\"id\"`"+`
+	Name       string         `+"`json:\"name\"`"+`
+	Attributes map[string]any `+"`json:\"attributes\"`"+`
+}
+
+func register(root, user Router) {
+	root.Register("health", neo.Query[NoInput, User]())
+	root.Register("inline", neo.Query[struct{}, []User]())
+	root.Nested("user", user)
+	user.Register("create", neo.Mutation[CreateInput, User]())
+	user.RegisterSubscription("changes", neo.Subscription[NoInput, User]())
+}
+`)
+
+	scan, err := scanPackage(dir)
+	if err != nil {
+		t.Fatalf("scanPackage returned error: %v", err)
+	}
+
+	src, err := generateTypeScript(scan.Procedures, scan.Types)
+	if err != nil {
+		t.Fatalf("generateTypeScript returned error: %v", err)
+	}
+	text := string(src)
+
+	assertContains(t, text, "export type NoInput = Record<string, never>;")
+	assertContains(t, text, "export interface CreateInput {")
+	assertContains(t, text, "name: string;")
+	assertContains(t, text, "age?: number;")
+	assertContains(t, text, "createdAt: string;")
+	assertContains(t, text, "tags: string[];")
+	assertContains(t, text, "maybe?: User | null;")
+	assertContains(t, text, "raw?: unknown;")
+	if strings.Contains(text, "secret") || strings.Contains(text, "Secret") {
+		t.Fatalf("generated source should not include json-ignored field\n--- source ---\n%s", text)
+	}
+	assertContains(t, text, "attributes: Record<string, unknown>;")
+	assertContains(t, text, "export class TypedClient {")
+	assertContains(t, text, "readonly user: UserClient;")
+	assertContains(t, text, "readonly health: HealthProcedure;")
+	assertContains(t, text, "export function createClient(addr: string, options?: NeoClientOptions): TypedClient")
+	assertContains(t, text, `return this.client.request<NoInput, User>("GET", "health", input, options);`)
+	assertContains(t, text, `return this.client.request<Record<string, never>, User[]>("GET", "inline", input, options);`)
+	assertContains(t, text, `return this.client.request<CreateInput, User>("POST", "user.create", input, options);`)
+	assertContains(t, text, `return this.client.subscribe<NoInput, User>("user.changes", input, options);`)
+	assertContains(t, text, `return this.client.subscribeWebSocket<NoInput, User>("user.changes", input, options);`)
+}
+
 func parseCall(t *testing.T, src string) *ast.CallExpr {
 	t.Helper()
 	expr, err := parser.ParseExpr(src)

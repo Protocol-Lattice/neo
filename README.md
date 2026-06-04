@@ -721,6 +721,12 @@ Generate a typed client:
 go run ./cmd/neo-gen -dir ./examples -out ./examples/neo.gen.go
 ```
 
+Generate a TypeScript client:
+
+```bash
+go run ./cmd/neo-gen -dir ./examples/ts_client -out ./examples/ts_client/neo.gen.ts -target ts
+```
+
 Use the generated client in application code:
 
 ```go
@@ -797,7 +803,32 @@ user, err := neo.CallTyped[GetUserInput, User](
 )
 ```
 
-Current Go codegen gives you:
+The TypeScript client uses `fetch` for queries, mutations, and NDJSON subscriptions, plus browser-compatible WebSocket subscriptions:
+
+```ts
+import { createClient } from "./neo.gen";
+
+const client = createClient("http://localhost:8080/neo", {
+  headers: {
+    Authorization: "Bearer <token>",
+  },
+});
+
+const user = await client.user.getByID.query({ id: 1 });
+const created = await client.user.create.mutate({ name: "Neo" });
+
+for await (const event of client.user.changes.subscribe({})) {
+  console.log(event.name);
+}
+
+for await (const event of client.user.changes.subscribeWebSocket({})) {
+  console.log(event.name);
+}
+```
+
+See `examples/ts_client` for a runnable Go server plus TypeScript client use case.
+
+Current codegen gives you:
 
 - generated Go client namespaces
 - compile-time checked input/output types
@@ -806,10 +837,12 @@ Current Go codegen gives you:
 - typed subscription `SubscribeWebSocket` methods for WebSocket streams
 - `NewTypedClient(addr, opts...)` support for auth/custom headers
 - `NewTypedClientFromClient(client)` for shared custom clients
+- generated TypeScript local interfaces from Go structs and JSON tags
+- typed TypeScript query, mutation, NDJSON subscription, and WebSocket subscription helpers
+- TypeScript client options for custom headers, custom `fetch`, and custom `WebSocket`
 
 Future codegen goals:
 
-- generated TypeScript client
 - procedure discovery endpoint
 - generated docs
 - generated OpenAPI-like schema
