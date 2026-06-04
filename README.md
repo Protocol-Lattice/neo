@@ -1,95 +1,869 @@
-# neo
+# Neo
 
-Small tRPC-style Go prototype with:
+> A lightweight, type-friendly, tRPC-style RPC framework for Go.
 
-- Query procedures
-- Mutation procedures
-- Subscription procedures over NDJSON HTTP streaming
-- Router middleware chain
-- Nested routers
-- In-memory event bus
-- Mutation-triggered subscription events
-- Typed procedure helpers
-- Generated typed client wrappers
+Neo gives Go backends a clean procedure-based API with **queries**, **mutations**, **subscriptions**, middleware, nested routers, generated metadata, and a small client API.
 
-## Typed server procedures
+It is designed for developers who like the tRPC mental model, but want something idiomatic and simple in Go.
 
 ```go
-app.Register("healthcheck", neo.Query[NoInput, HealthcheckOutput](func(ctx context.Context, input NoInput) (HealthcheckOutput, error) {
-    return HealthcheckOutput{OK: true, Service: "neo"}, nil
+router := neo.NewRouter()
+
+router.Register("user.get", neo.Query(func(ctx context.Context, in GetUserInput) (User, error) {
+	return User{ID: in.ID, Name: "Kamil"}, nil
 }))
 
-users.Register("create", neo.Mutation[CreateUserInput, User](func(ctx context.Context, input CreateUserInput) (User, error) {
-    return User{ID: 2, Name: input.Name}, nil
-}))
-
-users.RegisterSubscription("changes", neo.Subscription[NoInput, UserEvent](func(ctx context.Context, input NoInput) (<-chan UserEvent, error) {
-    return events, nil
+router.Register("user.create", neo.Mutation(func(ctx context.Context, in CreateUserInput) (User, error) {
+	return User{ID: 1, Name: in.Name}, nil
 }))
 ```
 
-## Generate typed client
+---
 
-The generator scans calls using `neo.Query[In, Out]`, `neo.Mutation[In, Out]`, and `neo.Subscription[In, Out]`.
+## Features
+
+- **Query / Mutation / Subscription procedures**
+- **Typed Go handlers**
+- **tRPC-style client**
+- **Nested routers**
+- **Router merge**
+- **Middleware**
+- **Event-triggered subscriptions**
+- **Pluggable event broker**
+- **CORS preflight support**
+- **Safe internal error redaction**
+- **POST queries for large payloads**
+- **Server hardening options**
+- **Codegen-friendly metadata**
+- **Race-tested in-memory event bus**
+
+---
+
+## Installation
 
 ```bash
-go run ./cmd/neo-gen -dir ./examples -out ./examples/neo.gen.go
+go get github.com/Protocol-Lattice/neo
 ```
 
-Generated usage:
+---
+
+## Quick Start
+
+### Server
 
 ```go
-client := NewTypedClient(server.URL + "/neo")
+package main
 
-health, err := client.Healthcheck.Query(ctx, NoInput{})
-user, err := client.User.GetByID.Query(ctx, GetUserInput{ID: 1})
-created, err := client.User.Create.Mutate(ctx, CreateUserInput{Name: "Raezil"})
-changes, err := client.User.Changes.Subscribe(ctx, NoInput{})
+import (
+	"context"
+	"log"
+
+	"github.com/Protocol-Lattice/neo"
+)
+
+type HelloInput struct {
+	Name string `json:"name"`
+}
+
+type HelloOutput struct {
+	Message string `json:"message"`
+}
+
+func main() {
+	router := neo.NewRouter()
+
+	router.Register("hello", neo.Query(func(ctx context.Context, in HelloInput) (HelloOutput, error) {
+		return HelloOutput{Message: "Hello, " + in.Name}, nil
+	}))
+
+	log.Println("Neo listening on :8080")
+
+	if err := router.ListenAndServe(neo.ServerOptions{
+		Addr:   ":8080",
+		Prefix: "/neo/",
+	}); err != nil {
+		log.Fatal(err)
+	}
+}
 ```
 
-## Errors
+Call it:
 
-Return a typed `neo.Error` to control the HTTP status and hand the client a
-machine-readable code. Any other error is treated as `INTERNAL` (HTTP 500), so
-existing handlers that return plain errors keep working.
+```bash
+curl 'http://localhost:8080/neo/hello?input={"name":"Neo"}'
+```
+
+Response:
+
+```json
+{
+  "result": {
+    "message": "Hello, Neo"
+  }
+}
+```
+
+---
+
+## Client
 
 ```go
-users.Register("get", neo.Query[GetUserInput, User](func(ctx context.Context, in GetUserInput) (User, error) {
-    u, ok := store.Find(in.ID)
-    if !ok {
-        return User{}, neo.NewError(neo.CodeNotFound, "no such user")
-    }
-    return u, nil
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/Protocol-Lattice/neo"
+)
+
+type HelloInput struct {
+	Name string `json:"name"`
+}
+
+type HelloOutput struct {
+	Message string `json:"message"`
+}
+
+func main() {
+	client := neo.NewClient("http://localhost:8080/neo")
+
+	out, err := neo.CallTyped[HelloInput, HelloOutput](
+		context.Background(),
+		client.Query.Procedure("hello"),
+		HelloInput{Name: "Kamil"},
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(out.Message)
+}
+```
+
+---
+
+## Queries
+
+Queries are read-style procedures.
+
+By default, simple query inputs can be sent through `GET` query params.
+
+```go
+router.Register("user.get", neo.Query(func(ctx context.Context, in GetUserInput) (User, error) {
+	return db.GetUser(ctx, in.ID)
 }))
 ```
 
-Codes map to statuses (`BAD_REQUEST`→400, `UNAUTHORIZED`→401, `FORBIDDEN`→403,
-`NOT_FOUND`→404, `METHOD_NOT_ALLOWED`→405, `CONFLICT`→409, `TOO_MANY_REQUESTS`→429,
-`INTERNAL`→500, `NOT_IMPLEMENTED`→501, `UNAVAILABLE`→503, `TIMEOUT`→504). The
-client returns a `*neo.Error`, so callers can branch with `errors.As`.
-
-## HTTP method mapping
-
-Queries are served over `GET`, mutations over `POST`, and subscriptions over
-`GET` (NDJSON stream). The router enforces this and replies `405` with an
-`Allow` header on a mismatch.
-
-## Registration contract
-
-A `Router` is not synchronized: complete all registration before serving.
-
-- Register every procedure (`Register`, `RegisterSubscription`, `Merge`,
-  `Nested`) before the first request. The maps are unlocked for zero
-  per-request overhead, so registering while serving is a data race.
-- `Use` must be called **before** the procedures it should wrap. Middleware is
-  snapshotted into each procedure at registration time and is not applied
-  retroactively. For scoped middleware, build a sub-router, call `Use` on it,
-  register into it, then attach it with `Nested`/`Merge`.
-
-## Run
+Example request:
 
 ```bash
-go run ./examples
+curl 'http://localhost:8080/neo/user.get?input={"id":1}'
 ```
 
-The example uses `httptest.NewServer`, so it does not require port `8080`.
+Neo also supports query-over-`POST` for larger inputs, avoiding URL size limits.
+
+```bash
+curl -X POST 'http://localhost:8080/neo/user.get' \
+  -H 'Content-Type: application/json' \
+  -d '{"input":{"id":1}}'
+```
+
+---
+
+## Mutations
+
+Mutations are write-style procedures and are served over `POST`.
+
+```go
+type CreateUserInput struct {
+	Name string `json:"name"`
+}
+
+type User struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+router.Register("user.create", neo.Mutation(func(ctx context.Context, in CreateUserInput) (User, error) {
+	return db.CreateUser(ctx, in.Name)
+}))
+```
+
+Example request:
+
+```bash
+curl -X POST 'http://localhost:8080/neo/user.create' \
+  -H 'Content-Type: application/json' \
+  -d '{"input":{"name":"Kamil"}}'
+```
+
+---
+
+## Subscriptions
+
+Subscriptions stream newline-delimited JSON responses.
+
+```go
+router.RegisterSubscription("events.feed", neo.Subscription(func(ctx context.Context, in struct{}) (<-chan any, error) {
+	return router.Events().Subscribe(ctx, "feed"), nil
+}))
+```
+
+A mutation can publish an event:
+
+```go
+router.Register("post.create", neo.Mutation(func(ctx context.Context, in CreatePostInput) (Post, error) {
+	post := Post{ID: 1, Title: in.Title}
+
+	router.Events().Publish("feed", neo.Event{
+		Topic: "feed",
+		Name:  "post.created",
+		Data:  post,
+	})
+
+	return post, nil
+}))
+```
+
+Client usage:
+
+```go
+stream, err := client.Subscription.Procedure("events.feed").Subscribe(ctx, nil)
+if err != nil {
+	log.Fatal(err)
+}
+
+for event := range stream {
+	fmt.Printf("event: %#v\n", event)
+}
+```
+
+---
+
+## Event Broker
+
+Neo ships with an in-memory event bus by default.
+
+That is great for:
+
+- examples
+- tests
+- local apps
+- single-process deployments
+
+For production multi-instance systems, use a distributed broker such as:
+
+- Redis Pub/Sub
+- NATS
+- Kafka
+- RabbitMQ
+- Postgres `LISTEN/NOTIFY`
+
+Neo exposes a small broker interface:
+
+```go
+type EventBroker interface {
+	Publish(topic string, event any)
+	Subscribe(ctx context.Context, topic string) <-chan any
+}
+```
+
+Use a custom broker:
+
+```go
+router := neo.NewRouter()
+router.UseEvents(myRedisBroker)
+```
+
+The default in-memory bus is intentionally tiny and non-blocking. Slow subscribers do not block mutation handlers.
+
+---
+
+## Middleware
+
+Middleware wraps procedure execution.
+
+```go
+func LoggingMiddleware(next neo.Handler) neo.Handler {
+	return func(ctx context.Context, input any) (any, error) {
+		log.Printf("input: %#v", input)
+
+		out, err := next(ctx, input)
+
+		log.Printf("output: %#v err=%v", out, err)
+
+		return out, err
+	}
+}
+```
+
+Use it before registering procedures:
+
+```go
+router := neo.NewRouter()
+
+router.Use(LoggingMiddleware)
+
+router.Register("hello", neo.Query(func(ctx context.Context, in HelloInput) (HelloOutput, error) {
+	return HelloOutput{Message: "hello " + in.Name}, nil
+}))
+```
+
+Middleware is snapshotted at registration time. This makes behavior predictable and avoids per-request router mutation.
+
+---
+
+## Nested Routers
+
+```go
+api := neo.NewRouter()
+users := neo.NewRouter()
+
+users.Register("get", neo.Query(func(ctx context.Context, in GetUserInput) (User, error) {
+	return User{ID: in.ID}, nil
+}))
+
+users.Register("create", neo.Mutation(func(ctx context.Context, in CreateUserInput) (User, error) {
+	return User{ID: 1, Name: in.Name}, nil
+}))
+
+api.Nested("user", users)
+```
+
+Registered procedures:
+
+```txt
+user.get
+user.create
+```
+
+---
+
+## Merge Routers
+
+```go
+app := neo.NewRouter()
+
+auth := neo.NewRouter()
+billing := neo.NewRouter()
+
+app.Merge(auth)
+app.Merge(billing)
+```
+
+This is useful for composing larger APIs from smaller modules.
+
+---
+
+## Error Handling
+
+Neo has structured, machine-readable errors.
+
+```go
+return User{}, neo.NewError(neo.CodeNotFound, "user not found")
+```
+
+Response:
+
+```json
+{
+  "code": "NOT_FOUND",
+  "error": "user not found"
+}
+```
+
+Supported error codes:
+
+```go
+neo.CodeBadRequest
+neo.CodeUnauthorized
+neo.CodeForbidden
+neo.CodeNotFound
+neo.CodeMethodNotAllowed
+neo.CodeConflict
+neo.CodeTooManyRequests
+neo.CodeInternal
+neo.CodeNotImplemented
+neo.CodeUnavailable
+neo.CodeTimeout
+```
+
+Plain Go errors are treated as internal server errors:
+
+```go
+return User{}, errors.New("pq: connection refused to 10.0.0.5")
+```
+
+Neo logs the full error server-side but sends a safe message to the client:
+
+```json
+{
+  "code": "INTERNAL",
+  "error": "internal server error"
+}
+```
+
+This prevents accidental leakage of database errors, internal hosts, tokens, filesystem paths, or stack details.
+
+---
+
+## Server Options
+
+Neo can be used directly as an HTTP handler or served with hardened defaults.
+
+```go
+err := router.ListenAndServe(neo.ServerOptions{
+	Addr:         ":8080",
+	Prefix:       "/neo/",
+	ReadTimeout:  5 * time.Second,
+	WriteTimeout: 10 * time.Second,
+	IdleTimeout:  60 * time.Second,
+	MaxBodyBytes: 1 << 20,
+})
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+You can also mount Neo into your own mux:
+
+```go
+mux := http.NewServeMux()
+
+router.ServeHTTP(mux, "/neo/")
+
+server := &http.Server{
+	Addr:         ":8080",
+	Handler:      mux,
+	ReadTimeout:  5 * time.Second,
+	WriteTimeout: 10 * time.Second,
+	IdleTimeout:  60 * time.Second,
+}
+
+log.Fatal(server.ListenAndServe())
+```
+
+---
+
+## CORS
+
+Neo supports browser preflight requests.
+
+`OPTIONS` requests return `204 No Content` with the appropriate CORS headers.
+
+This makes Neo usable from browser clients and future TypeScript clients.
+
+---
+
+## Request Format
+
+### Query over GET
+
+```http
+GET /neo/user.get?input={"id":1}
+```
+
+### Query over POST
+
+```http
+POST /neo/user.get
+Content-Type: application/json
+
+{
+  "input": {
+    "id": 1
+  }
+}
+```
+
+### Mutation over POST
+
+```http
+POST /neo/user.create
+Content-Type: application/json
+
+{
+  "input": {
+    "name": "Kamil"
+  }
+}
+```
+
+### Subscription over GET
+
+```http
+GET /neo/events.feed
+Accept: application/x-ndjson
+```
+
+---
+
+## Response Format
+
+### Success
+
+```json
+{
+  "result": {
+    "message": "hello"
+  }
+}
+```
+
+### Error
+
+```json
+{
+  "code": "NOT_FOUND",
+  "error": "procedure not found"
+}
+```
+
+### Subscription Stream
+
+```json
+{"result":{"name":"post.created","data":{"id":1}}}
+{"result":{"name":"post.created","data":{"id":2}}}
+{"result":{"name":"post.created","data":{"id":3}}}
+```
+
+---
+
+## Metadata
+
+Neo stores procedure metadata for code generation.
+
+```go
+metadata := router.Metadata()
+```
+
+Example metadata:
+
+```json
+[
+  {
+    "key": "user.get",
+    "kind": "query",
+    "input": "GetUserInput",
+    "output": "User"
+  },
+  {
+    "key": "user.create",
+    "kind": "mutation",
+    "input": "CreateUserInput",
+    "output": "User"
+  }
+]
+```
+
+This is the foundation for generated typed clients.
+
+---
+
+## Codegen Direction
+
+Neo is designed to support generated clients and typed procedure bindings.
+
+The ideal generated client should allow usage like:
+
+```go
+user, err := client.User.Get(ctx, GetUserInput{ID: 1})
+```
+
+Instead of:
+
+```go
+user, err := neo.CallTyped[GetUserInput, User](
+	ctx,
+	client.Query.Procedure("user.get"),
+	GetUserInput{ID: 1},
+)
+```
+
+Future codegen goals:
+
+- generated Go client
+- generated TypeScript client
+- procedure discovery
+- compile-time checked paths
+- typed input/output bindings
+- generated docs
+- generated OpenAPI-like schema
+
+---
+
+## Testing
+
+Run tests:
+
+```bash
+go test ./...
+```
+
+Run race tests:
+
+```bash
+go test -race ./...
+```
+
+Run benchmarks:
+
+```bash
+go test -bench=. -benchmem ./...
+```
+
+Recommended full check:
+
+```bash
+go test ./... &&
+go test -race ./... &&
+go test -bench=. -benchmem ./...
+```
+
+---
+
+## Performance Notes
+
+Neo favors developer experience and type-friendly RPC ergonomics.
+
+Internally, the generic procedure layer bridges typed Go handlers with transport-level `any` values. This can involve JSON marshal/unmarshal conversion when decoding dynamic inputs into typed structs.
+
+That means Neo will not be faster than hand-written `net/http` handlers in raw microbenchmarks.
+
+The goal is different:
+
+- faster API development
+- cleaner procedure organization
+- fewer manual routing mistakes
+- typed inputs and outputs
+- generated clients
+- subscription support
+- good-enough performance for most app backends
+
+For maximum performance-critical endpoints, you can still mount custom `net/http` handlers beside Neo.
+
+---
+
+## Production Notes
+
+Recommended production setup:
+
+```go
+server := &http.Server{
+	Addr:         ":8080",
+	Handler:      mux,
+	ReadTimeout:  5 * time.Second,
+	WriteTimeout: 10 * time.Second,
+	IdleTimeout:  60 * time.Second,
+}
+```
+
+Also consider:
+
+- reverse proxy request limits
+- structured logging
+- panic recovery middleware
+- authentication middleware
+- rate limiting
+- distributed event broker
+- graceful shutdown
+- observability with metrics/tracing
+- generated clients checked in CI
+
+---
+
+## Example Project Layout
+
+```txt
+.
+├── cmd
+│   └── api
+│       └── main.go
+├── internal
+│   ├── users
+│   │   ├── router.go
+│   │   ├── procedures.go
+│   │   └── types.go
+│   ├── posts
+│   │   ├── router.go
+│   │   ├── procedures.go
+│   │   └── types.go
+│   └── events
+│       └── broker.go
+├── go.mod
+└── go.sum
+```
+
+Example module router:
+
+```go
+package users
+
+import (
+	"context"
+
+	"github.com/Protocol-Lattice/neo"
+)
+
+func Router() *neo.Router {
+	router := neo.NewRouter()
+
+	router.Register("get", neo.Query(Get))
+	router.Register("create", neo.Mutation(Create))
+
+	return router
+}
+
+func Get(ctx context.Context, in GetUserInput) (User, error) {
+	return User{ID: in.ID, Name: "Kamil"}, nil
+}
+
+func Create(ctx context.Context, in CreateUserInput) (User, error) {
+	return User{ID: 1, Name: in.Name}, nil
+}
+```
+
+App router:
+
+```go
+router := neo.NewRouter()
+
+router.Nested("user", users.Router())
+router.Nested("post", posts.Router())
+```
+
+---
+
+## Authentication Middleware Example
+
+```go
+func AuthMiddleware(next neo.Handler) neo.Handler {
+	return func(ctx context.Context, input any) (any, error) {
+		userID, ok := ctx.Value("user_id").(string)
+		if !ok || userID == "" {
+			return nil, neo.NewError(neo.CodeUnauthorized, "unauthorized")
+		}
+
+		return next(ctx, input)
+	}
+}
+```
+
+Usage:
+
+```go
+router.Use(AuthMiddleware)
+
+router.Register("me", neo.Query(func(ctx context.Context, in struct{}) (User, error) {
+	userID := ctx.Value("user_id").(string)
+	return User{ID: userID}, nil
+}))
+```
+
+---
+
+## Rate Limit Middleware Example
+
+```go
+func RateLimitMiddleware(next neo.Handler) neo.Handler {
+	sem := make(chan struct{}, 64)
+
+	return func(ctx context.Context, input any) (any, error) {
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		case <-ctx.Done():
+			return nil, neo.NewError(neo.CodeTimeout, "request cancelled")
+		default:
+			return nil, neo.NewError(neo.CodeTooManyRequests, "too many requests")
+		}
+
+		return next(ctx, input)
+	}
+}
+```
+
+---
+
+## Roadmap
+
+- [x] Query procedures
+- [x] Mutation procedures
+- [x] Subscription procedures
+- [x] Middleware
+- [x] Nested routers
+- [x] Router merge
+- [x] Structured errors
+- [x] Internal error redaction
+- [x] CORS preflight support
+- [x] Server hardening options
+- [x] POST queries
+- [x] Event broker abstraction
+- [ ] Robust Go codegen
+- [ ] Generated typed Go client
+- [ ] Generated TypeScript client
+- [ ] Redis event broker
+- [ ] NATS event broker
+- [ ] Postgres `LISTEN/NOTIFY` broker
+- [ ] OpenAPI/schema export
+- [ ] Observability middleware
+- [ ] More production examples
+
+---
+
+## Philosophy
+
+Neo is built around a simple idea:
+
+> Backend APIs should be organized as typed procedures, not scattered route handlers.
+
+Go already has excellent primitives:
+
+- `context.Context`
+- `net/http`
+- structs
+- interfaces
+- generics
+- channels
+- middleware-style function composition
+
+Neo connects those primitives into a compact RPC framework.
+
+No magic runtime required.  
+No heavy dependency graph required.  
+No complicated server object required.
+
+Just routers, procedures, middleware, and typed handlers.
+
+---
+
+## Status
+
+Neo is young but already has the core architecture of a serious framework:
+
+- simple API
+- good extension points
+- tested router behavior
+- safer production defaults
+- clear path toward codegen
+- clear path toward browser clients
+- clear path toward distributed subscriptions
+
+Use it for experiments, internal tools, and early-stage services.
+
+For production, pair it with:
+
+- robust auth
+- proper logging
+- graceful shutdown
+- distributed event broker
+- generated clients
+- CI with `go test -race`
+
+---
+
+## License
+
+MIT
