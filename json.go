@@ -1,0 +1,50 @@
+package neo
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+)
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, Response{
+		Error: message,
+	})
+}
+
+func readInput(r *http.Request) (any, error) {
+	switch r.Method {
+	case http.MethodGet:
+		rawInput := r.URL.Query().Get("input")
+		if rawInput == "" {
+			return nil, nil
+		}
+
+		var input any
+		if err := json.Unmarshal([]byte(rawInput), &input); err != nil {
+			return nil, errors.New("invalid input query")
+		}
+
+		return input, nil
+
+	case http.MethodPost:
+		defer r.Body.Close()
+
+		var req Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return nil, errors.New("invalid JSON body")
+		}
+
+		return req.Input, nil
+
+	default:
+		return nil, errors.New("method not allowed")
+	}
+}
