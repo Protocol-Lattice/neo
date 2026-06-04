@@ -29,6 +29,7 @@ router.Register("user.create", neo.Mutation(func(ctx context.Context, in CreateU
 - **Router merge**
 - **Middleware**
 - **Event-triggered subscriptions**
+- **NDJSON and WebSocket subscription transports**
 - **Pluggable event broker**
 - **Standard-library NATS broker adapter**
 - **CORS preflight support**
@@ -207,7 +208,10 @@ curl -X POST 'http://localhost:8080/neo/user.create' \
 
 ## Subscriptions
 
-Subscriptions stream newline-delimited JSON responses.
+Subscriptions expose server-pushed events from typed Go handlers. Neo supports two subscription transports:
+
+- **NDJSON over HTTP** — simple, curl-friendly, and the default client subscription transport.
+- **WebSocket** — browser-friendly bidirectional transport for real-time applications.
 
 ```go
 router.RegisterSubscription("events.feed", neo.Subscription(func(ctx context.Context, in struct{}) (<-chan any, error) {
@@ -231,7 +235,7 @@ router.Register("post.create", neo.Mutation(func(ctx context.Context, in CreateP
 }))
 ```
 
-Client usage:
+NDJSON client usage:
 
 ```go
 stream, err := client.Subscription.Procedure("events.feed").Subscribe(ctx, nil)
@@ -241,6 +245,41 @@ if err != nil {
 
 for event := range stream {
 	fmt.Printf("event: %#v\n", event)
+}
+```
+
+WebSocket client usage:
+
+```go
+stream, err := client.Subscription.Procedure("events.feed").SubscribeWebSocket(ctx, nil)
+if err != nil {
+	log.Fatal(err)
+}
+
+for event := range stream {
+	fmt.Printf("event: %#v\n", event)
+}
+```
+
+Typed WebSocket subscriptions:
+
+```go
+type FeedEvent struct {
+	Name string `json:"name"`
+	Data Post   `json:"data"`
+}
+
+stream, err := neo.SubscribeWebSocketTyped[struct{}, FeedEvent](
+	ctx,
+	client.Subscription.Procedure("events.feed"),
+	struct{}{},
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+for event := range stream {
+	fmt.Println(event.Name)
 }
 ```
 
@@ -532,11 +571,27 @@ Content-Type: application/json
 }
 ```
 
-### Subscription over GET
+### Subscription over GET with NDJSON
 
 ```http
 GET /neo/events.feed
 Accept: application/x-ndjson
+```
+
+### Subscription over WebSocket
+
+```http
+GET /neo/events.feed?input={"topic":"feed"}
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: <base64 nonce>
+Sec-WebSocket-Version: 13
+```
+
+The server streams JSON WebSocket text frames using the same response envelope as NDJSON subscriptions.
+
+```json
+{"result":{"name":"post.created","data":{"id":1}}}
 ```
 
 ---
@@ -563,6 +618,8 @@ Accept: application/x-ndjson
 ```
 
 ### Subscription Stream
+
+NDJSON subscriptions stream one JSON envelope per line. WebSocket subscriptions stream the same envelopes as text frames.
 
 ```json
 {"result":{"name":"post.created","data":{"id":1}}}
@@ -710,7 +767,16 @@ func main() {
 	}
 
 	for event := range stream {
-		fmt.Printf("event: %#v\n", event)
+		fmt.Printf("ndjson event: %#v\n", event)
+	}
+
+	wsStream, err := client.User.Changes.SubscribeWebSocket(ctx, NoInput{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for event := range wsStream {
+		fmt.Printf("websocket event: %#v\n", event)
 	}
 }
 ```
@@ -736,7 +802,8 @@ Current Go codegen gives you:
 - generated Go client namespaces
 - compile-time checked input/output types
 - typed query and mutation `Call` methods
-- typed subscription `Subscribe` methods
+- typed subscription `Subscribe` methods for NDJSON
+- typed subscription `SubscribeWebSocket` methods for WebSocket streams
 - `NewTypedClient(addr, opts...)` support for auth/custom headers
 - `NewTypedClientFromClient(client)` for shared custom clients
 
@@ -794,7 +861,7 @@ The goal is different:
 - fewer manual routing mistakes
 - typed inputs and outputs
 - generated clients
-- subscription support
+- subscription support over NDJSON and WebSocket
 - good-enough performance for most app backends
 
 For maximum performance-critical endpoints, you can still mount custom `net/http` handlers beside Neo.
@@ -977,7 +1044,7 @@ Neo is young but already has the core architecture of a serious framework:
 - tested router behavior
 - safer production defaults
 - clear path toward codegen
-- clear path toward browser clients
+- WebSocket subscription transport for browser clients
 - clear path toward distributed subscriptions
 
 Use it for experiments, internal tools, and early-stage services.
