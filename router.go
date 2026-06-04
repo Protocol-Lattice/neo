@@ -8,6 +8,19 @@ import (
 	"strings"
 )
 
+// Router maps procedure keys to handlers and serves them over HTTP.
+//
+// Concurrency contract: a Router is NOT safe for concurrent registration and
+// serving. All registration (Register, RegisterSubscription, Use, Merge,
+// Nested) must complete before the first request is served; the internal maps
+// are deliberately unsynchronized for zero per-request locking. Once you call
+// Serve or hand the router to net/http, treat it as read-only.
+//
+// Middleware contract: middleware is snapshotted at Register/RegisterSubscription
+// time, so Use must be called BEFORE the procedures it should wrap. Calling Use
+// after a procedure is registered does not retroactively apply to it. For scoped
+// middleware, build a sub-router, call Use on it, register into it, then attach
+// it with Nested or Merge.
 type Router struct {
 	procedures              map[string]*Procedure[any, any, any]
 	subscriptions           map[string]*SubscriptionProcedure[any, any, any]
@@ -29,6 +42,9 @@ func NewRouter() *Router {
 	}
 }
 
+// Use appends global middleware. It must be called before the procedures it
+// should wrap: middleware is snapshotted into each procedure at registration
+// time and is not applied retroactively. See the Router doc comment.
 func (router *Router) Use(middlewares ...Middleware) {
 	router.ensure()
 	router.middlewares = append(router.middlewares, middlewares...)
@@ -179,13 +195,19 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 
 		procedure := router.Method(key)
 		if procedure == nil {
-			writeError(w, http.StatusNotFound, "procedure not found")
+			writeProcedureError(w, NewError(CodeNotFound, "procedure not found"))
+			return
+		}
+
+		if want, enforced := expectedMethod(procedure.Kind); enforced && r.Method != want {
+			w.Header().Set("Allow", want)
+			writeProcedureError(w, Errorf(CodeMethodNotAllowed, "%s requires %s", procedure.Kind, want))
 			return
 		}
 
 		input, err := readInput(r)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeProcedureError(w, WrapError(CodeBadRequest, err.Error(), err))
 			return
 		}
 
@@ -195,7 +217,7 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 
 		output, err := handler(r.Context(), input)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeProcedureError(w, err)
 			return
 		}
 
@@ -207,19 +229,20 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 
 func (router *Router) serveSubscription(w http.ResponseWriter, r *http.Request, key string, subscription *SubscriptionProcedure[any, any, any]) {
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "subscriptions require GET")
+		w.Header().Set("Allow", http.MethodGet)
+		writeProcedureError(w, NewError(CodeMethodNotAllowed, "subscriptions require GET"))
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming is not supported")
+		writeProcedureError(w, NewError(CodeInternal, "streaming is not supported"))
 		return
 	}
 
 	input, err := readInput(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeProcedureError(w, WrapError(CodeBadRequest, err.Error(), err))
 		return
 	}
 
@@ -229,13 +252,13 @@ func (router *Router) serveSubscription(w http.ResponseWriter, r *http.Request, 
 
 	rawStream, err := handler(r.Context(), input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeProcedureError(w, err)
 		return
 	}
 
 	stream, ok := rawStream.(<-chan any)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "invalid subscription stream")
+		writeProcedureError(w, NewError(CodeInternal, "invalid subscription stream"))
 		return
 	}
 
@@ -267,6 +290,20 @@ func applyMiddlewares(middlewares []Middleware, handler Handler) Handler {
 	}
 
 	return handler
+}
+
+// expectedMethod reports the HTTP method a procedure kind is served over.
+// Queries are GET, mutations are POST; subscriptions are handled separately
+// (and also require GET). The bool is false for kinds that are not enforced.
+func expectedMethod(kind ProcedureKind) (string, bool) {
+	switch kind {
+	case ProcedureKindQuery:
+		return http.MethodGet, true
+	case ProcedureKindMutation:
+		return http.MethodPost, true
+	default:
+		return "", false
+	}
 }
 
 func cloneMiddlewares(middlewares []Middleware) []Middleware {

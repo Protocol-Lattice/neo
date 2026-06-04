@@ -37,6 +37,7 @@ type Request struct {
 
 type Response struct {
 	Result any    `json:"result,omitempty"`
+	Code   string `json:"code,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
 
@@ -142,15 +143,15 @@ func (client *Client) call(ctx context.Context, method string, key string, input
 	}
 
 	if res.StatusCode >= 400 {
-		if rpcRes.Error != "" {
-			return nil, fmt.Errorf("%s", rpcRes.Error)
+		if rpcRes.Error == "" && rpcRes.Code == "" {
+			return nil, Errorf(CodeInternal, "procedure %q failed with status %d", key, res.StatusCode)
 		}
 
-		return nil, fmt.Errorf("procedure %q failed with status %d", key, res.StatusCode)
+		return nil, responseError(rpcRes)
 	}
 
-	if rpcRes.Error != "" {
-		return nil, fmt.Errorf("%s", rpcRes.Error)
+	if rpcRes.Error != "" || rpcRes.Code != "" {
+		return nil, responseError(rpcRes)
 	}
 
 	return rpcRes.Result, nil
@@ -174,13 +175,13 @@ func (client *Client) subscribe(ctx context.Context, key string, input any) (<-c
 
 		var rpcRes Response
 		if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
-			return nil, fmt.Errorf("subscription %q failed with status %d", key, res.StatusCode)
+			return nil, Errorf(CodeInternal, "subscription %q failed with status %d", key, res.StatusCode)
 		}
-		if rpcRes.Error != "" {
-			return nil, fmt.Errorf("%s", rpcRes.Error)
+		if rpcRes.Error != "" || rpcRes.Code != "" {
+			return nil, responseError(rpcRes)
 		}
 
-		return nil, fmt.Errorf("subscription %q failed with status %d", key, res.StatusCode)
+		return nil, Errorf(CodeInternal, "subscription %q failed with status %d", key, res.StatusCode)
 	}
 
 	out := make(chan any)
@@ -189,20 +190,32 @@ func (client *Client) subscribe(ctx context.Context, key string, input any) (<-c
 		defer res.Body.Close()
 		defer close(out)
 
-		scanner := bufio.NewScanner(res.Body)
-		for scanner.Scan() {
-			var rpcRes Response
-			if err := json.Unmarshal(scanner.Bytes(), &rpcRes); err != nil {
-				return
-			}
-			if rpcRes.Error != "" {
-				return
+		// bufio.Reader.ReadBytes grows to fit any line length, unlike
+		// bufio.Scanner which silently aborts the stream on lines over
+		// 64 KiB (bufio.MaxScanTokenSize).
+		reader := bufio.NewReader(res.Body)
+		for {
+			line, err := reader.ReadBytes('\n')
+
+			if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
+				var rpcRes Response
+				if jerr := json.Unmarshal(trimmed, &rpcRes); jerr != nil {
+					return
+				}
+				if rpcRes.Error != "" {
+					return
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case out <- rpcRes.Result:
+				}
 			}
 
-			select {
-			case <-ctx.Done():
+			if err != nil {
+				// io.EOF or a transport/context error: the stream is done.
 				return
-			case out <- rpcRes.Result:
 			}
 		}
 	}()
