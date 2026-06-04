@@ -403,6 +403,9 @@ func writeProcedureType(b *bytes.Buffer, p procedure) {
 		fmt.Fprintf(b, "func (p %sProcedure) Subscribe(ctx context.Context, input %s) (<-chan %s, error) {\n", typeName, p.Input, p.Output)
 		fmt.Fprintf(b, "\treturn neo.SubscribeTyped[%s, %s](ctx, p.client.Subscription.Procedure(\"%s\"), input)\n", p.Input, p.Output, p.Key)
 		b.WriteString("}\n\n")
+		fmt.Fprintf(b, "func (p %sProcedure) SubscribeWebSocket(ctx context.Context, input %s) (<-chan %s, error) {\n", typeName, p.Input, p.Output)
+		fmt.Fprintf(b, "\treturn neo.SubscribeWebSocketTyped[%s, %s](ctx, p.client.Subscription.Procedure(\"%s\"), input)\n", p.Input, p.Output, p.Key)
+		b.WriteString("}\n\n")
 	}
 }
 

@@ -331,16 +331,24 @@ func (router *Router) serveSubscription(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
+	stream, ok := router.openSubscriptionStream(w, r, key, subscription)
 	if !ok {
-		writeProcedureError(w, NewError(CodeInternal, "streaming is not supported"))
 		return
 	}
 
+	if isWebSocketRequest(r) {
+		serveWebSocket(w, r, stream)
+		return
+	}
+
+	serveNDJSONSubscription(w, r, stream)
+}
+
+func (router *Router) openSubscriptionStream(w http.ResponseWriter, r *http.Request, key string, subscription *SubscriptionProcedure[any, any, any]) (<-chan any, bool) {
 	input, err := readInput(r)
 	if err != nil {
 		writeProcedureError(w, WrapError(CodeBadRequest, err.Error(), err))
-		return
+		return nil, false
 	}
 
 	handler := applyMiddlewares(router.subscriptionMiddlewares[key], func(ctx context.Context, input any) (any, error) {
@@ -350,12 +358,22 @@ func (router *Router) serveSubscription(w http.ResponseWriter, r *http.Request, 
 	rawStream, err := handler(r.Context(), input)
 	if err != nil {
 		writeProcedureError(w, err)
-		return
+		return nil, false
 	}
 
 	stream, ok := rawStream.(<-chan any)
 	if !ok {
 		writeProcedureError(w, NewError(CodeInternal, "invalid subscription stream"))
+		return nil, false
+	}
+
+	return stream, true
+}
+
+func serveNDJSONSubscription(w http.ResponseWriter, r *http.Request, stream <-chan any) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeProcedureError(w, NewError(CodeInternal, "streaming is not supported"))
 		return
 	}
 

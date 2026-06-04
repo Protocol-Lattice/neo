@@ -56,6 +56,10 @@ func (p UserChangesProcedure) Subscribe(ctx context.Context, input NoInput) (<-c
 	return neo.SubscribeTyped[NoInput, UserEvent](ctx, p.client.Subscription.Procedure("user.changes"), input)
 }
 
+func (p UserChangesProcedure) SubscribeWebSocket(ctx context.Context, input NoInput) (<-chan UserEvent, error) {
+	return neo.SubscribeWebSocketTyped[NoInput, UserEvent](ctx, p.client.Subscription.Procedure("user.changes"), input)
+}
+
 type UserCreateProcedure struct {
 	client *neo.Client
 }
