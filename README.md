@@ -127,7 +127,10 @@ type HelloOutput struct {
 }
 
 func main() {
-	client := neo.NewClient("http://localhost:8080/neo")
+	client := neo.NewClient(
+	"http://localhost:8080/neo",
+	neo.WithHeader("Authorization", "Bearer <token>"),
+)
 
 	out, err := neo.CallTyped[HelloInput, HelloOutput](
 		context.Background(),
@@ -277,7 +280,7 @@ router := neo.NewRouter()
 router.UseEvents(myRedisBroker)
 ```
 
-The default in-memory bus is intentionally tiny and non-blocking. Slow subscribers do not block mutation handlers.
+The default in-memory bus is intentionally tiny and non-blocking. Slow subscribers do not block mutation handlers. Delivery is best-effort and lossy: if a subscriber buffer is full, new events for that subscriber are dropped. Use a distributed broker with explicit delivery guarantees for production multi-instance systems.
 
 ---
 
@@ -420,7 +423,7 @@ err := router.ListenAndServe(neo.ServerOptions{
 	ReadTimeout:  5 * time.Second,
 	WriteTimeout: 10 * time.Second,
 	IdleTimeout:  60 * time.Second,
-	MaxBodyBytes: 1 << 20,
+	MaxRequestBody: 1 << 20,
 })
 if err != nil {
 	log.Fatal(err)
@@ -451,9 +454,17 @@ log.Fatal(server.ListenAndServe())
 
 Neo supports browser preflight requests.
 
-`OPTIONS` requests return `204 No Content` with the appropriate CORS headers.
+`OPTIONS` requests return `204 No Content` with CORS headers. By default, Neo reflects the request `Origin` for local development. In production, configure allowed origins explicitly:
 
-This makes Neo usable from browser clients and future TypeScript clients.
+```go
+router.UseCORS(neo.CORSOptions{
+	AllowedOrigins:   []string{"https://app.example.com"},
+	AllowedHeaders:   []string{"Content-Type", "Authorization", "Accept", "X-Trace-ID"},
+	AllowCredentials: true,
+})
+```
+
+This makes Neo usable from browser clients and future TypeScript clients without forcing unsafe production defaults.
 
 ---
 
@@ -564,12 +575,12 @@ This is the foundation for generated typed clients.
 
 ## Codegen Direction
 
-Neo is designed to support generated clients and typed procedure bindings.
+Neo ships with a small `neo-gen` command for generated clients and typed procedure bindings.
 
-The ideal generated client should allow usage like:
+The generated client allows usage like:
 
 ```go
-user, err := client.User.Get(ctx, GetUserInput{ID: 1})
+user, err := client.User.Get.Call(ctx, GetUserInput{ID: 1})
 ```
 
 Instead of:
@@ -582,13 +593,17 @@ user, err := neo.CallTyped[GetUserInput, User](
 )
 ```
 
+Current Go codegen gives you:
+
+- generated Go client namespaces
+- compile-time checked input/output types
+- typed query and mutation `Call` methods
+- typed subscription `Subscribe` methods
+
 Future codegen goals:
 
-- generated Go client
 - generated TypeScript client
-- procedure discovery
-- compile-time checked paths
-- typed input/output bindings
+- procedure discovery endpoint
 - generated docs
 - generated OpenAPI-like schema
 
@@ -667,7 +682,7 @@ Also consider:
 - panic recovery middleware
 - authentication middleware
 - rate limiting
-- distributed event broker
+- distributed event broker with explicit delivery semantics
 - graceful shutdown
 - observability with metrics/tracing
 - generated clients checked in CI
@@ -801,13 +816,14 @@ func RateLimitMiddleware(next neo.Handler) neo.Handler {
 - [x] Server hardening options
 - [x] POST queries
 - [x] Event broker abstraction
-- [ ] Robust Go codegen
-- [ ] Generated typed Go client
+- [x] Robust Go codegen foundation
+- [x] Generated typed Go client
 - [ ] Generated TypeScript client
 - [ ] Redis event broker
 - [ ] NATS event broker
 - [ ] Postgres `LISTEN/NOTIFY` broker
 - [ ] OpenAPI/schema export
+- [ ] Configurable CORS examples
 - [ ] Observability middleware
 - [ ] More production examples
 
@@ -858,7 +874,7 @@ For production, pair it with:
 - robust auth
 - proper logging
 - graceful shutdown
-- distributed event broker
+- distributed event broker with explicit delivery semantics
 - generated clients
 - CI with `go test -race`
 

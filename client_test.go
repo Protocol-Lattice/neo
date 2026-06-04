@@ -27,6 +27,31 @@ func TestNewClientInitializesNamespacesAndTrimsAddress(t *testing.T) {
 	}
 }
 
+func TestClientOptionsConfigureHTTPClientAndHeaders(t *testing.T) {
+	customHTTP := &http.Client{Timeout: time.Second}
+	client := NewClient(
+		"http://example.test/neo",
+		WithHTTPClient(customHTTP),
+		WithHeader("Authorization", "Bearer token"),
+		WithHeaders(http.Header{"X-Trace-ID": []string{"trace-1"}}),
+	)
+
+	if client.http != customHTTP {
+		t.Fatal("custom HTTP client was not applied")
+	}
+
+	req, err := client.newRequest(context.Background(), http.MethodGet, "hello", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer token" {
+		t.Fatalf("authorization header = %q", got)
+	}
+	if got := req.Header.Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("trace header = %q", got)
+	}
+}
+
 func TestClientNamespaceProcedureTrimsKey(t *testing.T) {
 	client := NewClient("http://example.test/neo")
 	procedure := client.Query.Procedure("/user.get/")

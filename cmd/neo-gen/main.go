@@ -336,12 +336,12 @@ func generate(pkg string, procedures []procedure) ([]byte, error) {
 	}
 	b.WriteString("}\n\n")
 
-	b.WriteString("func NewTypedClient(addr string) *TypedClient {\n")
-	b.WriteString("\tc := neo.NewClient(addr)\n")
-	b.WriteString("\treturn newTypedClient(c)\n")
+	b.WriteString("func NewTypedClient(addr string, opts ...neo.ClientOption) *TypedClient {\n")
+	b.WriteString("\tc := neo.NewClient(addr, opts...)\n")
+	b.WriteString("\treturn NewTypedClientFromClient(c)\n")
 	b.WriteString("}\n\n")
 
-	b.WriteString("func newTypedClient(c *neo.Client) *TypedClient {\n")
+	b.WriteString("func NewTypedClientFromClient(c *neo.Client) *TypedClient {\n")
 	b.WriteString("\ttc := &TypedClient{client: c}\n")
 	for _, group := range sortedKeys(groups) {
 		fmt.Fprintf(&b, "\ttc.%s = %sClient{client: c}\n", exportName(group), exportName(group))
@@ -387,10 +387,16 @@ func writeProcedureType(b *bytes.Buffer, p procedure) {
 	switch p.Kind {
 	case "query":
 		fmt.Fprintf(b, "func (p %sProcedure) Query(ctx context.Context, input %s) (%s, error) {\n", typeName, p.Input, p.Output)
+		fmt.Fprintf(b, "\treturn p.Call(ctx, input)\n")
+		b.WriteString("}\n\n")
+		fmt.Fprintf(b, "func (p %sProcedure) Call(ctx context.Context, input %s) (%s, error) {\n", typeName, p.Input, p.Output)
 		fmt.Fprintf(b, "\treturn neo.CallTyped[%s, %s](ctx, p.client.Query.Procedure(\"%s\"), input)\n", p.Input, p.Output, p.Key)
 		b.WriteString("}\n\n")
 	case "mutation":
 		fmt.Fprintf(b, "func (p %sProcedure) Mutate(ctx context.Context, input %s) (%s, error) {\n", typeName, p.Input, p.Output)
+		fmt.Fprintf(b, "\treturn p.Call(ctx, input)\n")
+		b.WriteString("}\n\n")
+		fmt.Fprintf(b, "func (p %sProcedure) Call(ctx context.Context, input %s) (%s, error) {\n", typeName, p.Input, p.Output)
 		fmt.Fprintf(b, "\treturn neo.CallTyped[%s, %s](ctx, p.client.Mutation.Procedure(\"%s\"), input)\n", p.Input, p.Output, p.Key)
 		b.WriteString("}\n\n")
 	case "subscription":

@@ -35,6 +35,7 @@ type Router struct {
 	subscriptionMiddlewares map[string][]Middleware
 	middlewares             []Middleware
 	events                  EventBroker
+	cors                    CORSOptions
 	metadata                map[string]ProcedureMeta
 }
 
@@ -45,6 +46,18 @@ type ServerOptions struct {
 	WriteTimeout   time.Duration
 	IdleTimeout    time.Duration
 	MaxRequestBody int64
+}
+
+// CORSOptions controls the browser CORS headers Neo emits for mounted routes.
+// The zero value is intentionally permissive for local development: it reflects
+// any request Origin and allows GET, HEAD, POST, OPTIONS plus common JSON/auth
+// headers. Production apps should set AllowedOrigins explicitly.
+type CORSOptions struct {
+	AllowedOrigins   []string
+	AllowedMethods   []string
+	AllowedHeaders   []string
+	AllowCredentials bool
+	MaxAge           time.Duration
 }
 
 func NewRouter() *Router {
@@ -91,6 +104,14 @@ func (router *Router) Use(middlewares ...Middleware) {
 func (router *Router) Events() EventBroker {
 	router.ensure()
 	return router.events
+}
+
+// UseCORS configures CORS response headers for this router.
+// Call it during setup, before serving. The zero value allows local development
+// by reflecting the request Origin; set AllowedOrigins for production.
+func (router *Router) UseCORS(opts CORSOptions) {
+	router.ensure()
+	router.cors = opts
 }
 
 // UseEvents replaces the default in-memory EventBus with a custom broker.
@@ -254,7 +275,7 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 	prefix = "/" + strings.Trim(prefix, "/") + "/"
 
 	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
-		writeCORSHeaders(w, r)
+		writeCORSHeaders(w, r, router.cors)
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Allow", "GET, HEAD, POST, OPTIONS")
 			w.WriteHeader(http.StatusNoContent)
@@ -399,15 +420,52 @@ func allowedMethods(want string) string {
 	return want + ", OPTIONS"
 }
 
-func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
+func writeCORSHeaders(w http.ResponseWriter, r *http.Request, opts CORSOptions) {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return
 	}
-	w.Header().Set("Access-Control-Allow-Origin", origin)
+
+	allowedOrigin, ok := corsAllowedOrigin(origin, opts)
+	if !ok {
+		return
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 	w.Header().Set("Vary", "Origin")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
+	w.Header().Set("Access-Control-Allow-Methods", strings.Join(corsValues(opts.AllowedMethods, []string{"GET", "HEAD", "POST", "OPTIONS"}), ", "))
+	w.Header().Set("Access-Control-Allow-Headers", strings.Join(corsValues(opts.AllowedHeaders, []string{"Content-Type", "Authorization", "Accept"}), ", "))
+	if opts.AllowCredentials {
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
+	if opts.MaxAge > 0 {
+		w.Header().Set("Access-Control-Max-Age", strings.TrimSuffix(opts.MaxAge.Truncate(time.Second).String(), "s"))
+	}
+}
+
+func corsAllowedOrigin(origin string, opts CORSOptions) (string, bool) {
+	if len(opts.AllowedOrigins) == 0 {
+		return origin, true
+	}
+	for _, allowed := range opts.AllowedOrigins {
+		switch allowed {
+		case "*":
+			if opts.AllowCredentials {
+				return origin, true
+			}
+			return "*", true
+		case origin:
+			return origin, true
+		}
+	}
+	return "", false
+}
+
+func corsValues(values []string, defaults []string) []string {
+	if len(values) == 0 {
+		return defaults
+	}
+	return values
 }
 
 func cloneMiddlewares(middlewares []Middleware) []Middleware {

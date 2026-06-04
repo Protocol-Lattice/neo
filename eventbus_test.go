@@ -85,3 +85,28 @@ func TestRouterUseEventsNilRestoresDefault(t *testing.T) {
 		t.Fatal("Events() is nil, want default in-memory broker")
 	}
 }
+
+func TestEventBusWithOptionsControlsSubscriberBuffer(t *testing.T) {
+	bus := NewEventBusWithOptions(EventBusOptions{SubscriberBuffer: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sub := bus.Subscribe(ctx, "topic")
+	bus.Publish("topic", "first")
+	bus.Publish("topic", "second") // dropped because the subscriber buffer is full.
+
+	select {
+	case got := <-sub:
+		if got != "first" {
+			t.Fatalf("event = %#v, want first", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first event")
+	}
+
+	select {
+	case got := <-sub:
+		t.Fatalf("unexpected second event: %#v", got)
+	default:
+	}
+}

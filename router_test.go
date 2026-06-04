@@ -158,3 +158,40 @@ func TestMergeCopiesProceduresSubscriptionsMetadataAndMiddleware(t *testing.T) {
 		t.Fatalf("middleware calls = %d, want 1", calls.Load())
 	}
 }
+
+func TestUseCORSRestrictsOriginsAndCredentials(t *testing.T) {
+	router := NewRouter()
+	router.UseCORS(CORSOptions{
+		AllowedOrigins:   []string{"https://app.example"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Trace-ID"},
+		AllowCredentials: true,
+	})
+	router.Register("ping", Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	allowed := httptest.NewRecorder()
+	allowedReq := httptest.NewRequest(http.MethodOptions, "/neo/ping", nil)
+	allowedReq.Header.Set("Origin", "https://app.example")
+	mux.ServeHTTP(allowed, allowedReq)
+
+	if got := allowed.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example" {
+		t.Fatalf("allowed origin = %q", got)
+	}
+	if got := allowed.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("allow credentials = %q", got)
+	}
+	if got := allowed.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(got, "X-Trace-ID") {
+		t.Fatalf("allow headers = %q", got)
+	}
+
+	blocked := httptest.NewRecorder()
+	blockedReq := httptest.NewRequest(http.MethodOptions, "/neo/ping", nil)
+	blockedReq.Header.Set("Origin", "https://evil.example")
+	mux.ServeHTTP(blocked, blockedReq)
+
+	if got := blocked.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("blocked origin header = %q, want empty", got)
+	}
+}

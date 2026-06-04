@@ -14,12 +14,12 @@ type TypedClient struct {
 	Healthcheck HealthcheckProcedure
 }
 
-func NewTypedClient(addr string) *TypedClient {
-	c := neo.NewClient(addr)
-	return newTypedClient(c)
+func NewTypedClient(addr string, opts ...neo.ClientOption) *TypedClient {
+	c := neo.NewClient(addr, opts...)
+	return NewTypedClientFromClient(c)
 }
 
-func newTypedClient(c *neo.Client) *TypedClient {
+func NewTypedClientFromClient(c *neo.Client) *TypedClient {
 	tc := &TypedClient{client: c}
 	tc.User = UserClient{client: c}
 	tc.User.Changes = UserChangesProcedure{client: c}
@@ -41,6 +41,10 @@ type HealthcheckProcedure struct {
 }
 
 func (p HealthcheckProcedure) Query(ctx context.Context, input NoInput) (HealthcheckOutput, error) {
+	return p.Call(ctx, input)
+}
+
+func (p HealthcheckProcedure) Call(ctx context.Context, input NoInput) (HealthcheckOutput, error) {
 	return neo.CallTyped[NoInput, HealthcheckOutput](ctx, p.client.Query.Procedure("healthcheck"), input)
 }
 
@@ -57,6 +61,10 @@ type UserCreateProcedure struct {
 }
 
 func (p UserCreateProcedure) Mutate(ctx context.Context, input CreateUserInput) (User, error) {
+	return p.Call(ctx, input)
+}
+
+func (p UserCreateProcedure) Call(ctx context.Context, input CreateUserInput) (User, error) {
 	return neo.CallTyped[CreateUserInput, User](ctx, p.client.Mutation.Procedure("user.create"), input)
 }
 
@@ -65,5 +73,9 @@ type UserGetByIDProcedure struct {
 }
 
 func (p UserGetByIDProcedure) Query(ctx context.Context, input GetUserInput) (User, error) {
+	return p.Call(ctx, input)
+}
+
+func (p UserGetByIDProcedure) Call(ctx context.Context, input GetUserInput) (User, error) {
 	return neo.CallTyped[GetUserInput, User](ctx, p.client.Query.Procedure("user.getByID"), input)
 }

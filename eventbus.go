@@ -27,22 +27,44 @@ type EventBroker interface {
 	Subscribe(ctx context.Context, topic string) <-chan any
 }
 
+const DefaultEventBusSubscriberBuffer = 16
+
+// EventBusOptions configures Neo's in-memory event bus.
+type EventBusOptions struct {
+	// SubscriberBuffer controls how many events a subscriber can lag before the
+	// in-memory bus starts dropping new events for that subscriber. Values <= 0
+	// use DefaultEventBusSubscriberBuffer.
+	SubscriberBuffer int
+}
+
 // EventBus is Neo's default in-memory EventBroker.
 //
 // It is intentionally tiny: good for examples, tests, and single-process apps.
 // It does not distribute events across processes and does not persist messages.
+// Delivery is best-effort and lossy for slow subscribers: Publish never blocks
+// mutation handlers, so events are dropped when a subscriber buffer is full.
 // For production multi-instance deployments, use Router.UseEvents with a
 // distributed EventBroker adapter.
 type EventBus struct {
-	mu          sync.RWMutex
-	subscribers map[string]map[chan any]struct{}
+	mu               sync.RWMutex
+	subscriberBuffer int
+	subscribers      map[string]map[chan any]struct{}
 }
 
 var _ EventBroker = (*EventBus)(nil)
 
 func NewEventBus() *EventBus {
+	return NewEventBusWithOptions(EventBusOptions{})
+}
+
+func NewEventBusWithOptions(opts EventBusOptions) *EventBus {
+	buffer := opts.SubscriberBuffer
+	if buffer <= 0 {
+		buffer = DefaultEventBusSubscriberBuffer
+	}
 	return &EventBus{
-		subscribers: make(map[string]map[chan any]struct{}),
+		subscriberBuffer: buffer,
+		subscribers:      make(map[string]map[chan any]struct{}),
 	}
 }
 
@@ -64,7 +86,11 @@ func (bus *EventBus) Publish(topic string, event any) {
 }
 
 func (bus *EventBus) Subscribe(ctx context.Context, topic string) <-chan any {
-	out := make(chan any, 16)
+	buffer := DefaultEventBusSubscriberBuffer
+	if bus != nil && bus.subscriberBuffer > 0 {
+		buffer = bus.subscriberBuffer
+	}
+	out := make(chan any, buffer)
 	if bus == nil {
 		close(out)
 		return out

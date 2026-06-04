@@ -12,8 +12,9 @@ import (
 )
 
 type Client struct {
-	http *http.Client
-	addr string
+	http    *http.Client
+	addr    string
+	headers http.Header
 
 	Query        *ClientNamespace
 	Mutation     *ClientNamespace
@@ -31,6 +32,39 @@ type ClientProcedure struct {
 	key    string
 }
 
+// ClientOption customizes a Neo client without making the common case noisy.
+type ClientOption func(*Client)
+
+// WithHTTPClient replaces the default HTTP client. Nil is ignored.
+func WithHTTPClient(httpClient *http.Client) ClientOption {
+	return func(client *Client) {
+		if httpClient != nil {
+			client.http = httpClient
+		}
+	}
+}
+
+// WithHeader adds a header to every request. Empty names are ignored.
+func WithHeader(name, value string) ClientOption {
+	return func(client *Client) {
+		if name == "" {
+			return
+		}
+		client.headers.Set(name, value)
+	}
+}
+
+// WithHeaders adds all provided headers to every request.
+func WithHeaders(headers http.Header) ClientOption {
+	return func(client *Client) {
+		for name, values := range headers {
+			for _, value := range values {
+				client.headers.Add(name, value)
+			}
+		}
+	}
+}
+
 type Request struct {
 	Input any `json:"input"`
 }
@@ -43,10 +77,17 @@ type Response struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func NewClient(addr string) *Client {
+func NewClient(addr string, opts ...ClientOption) *Client {
 	client := &Client{
-		http: http.DefaultClient,
-		addr: strings.TrimRight(addr, "/"),
+		http:    http.DefaultClient,
+		addr:    strings.TrimRight(addr, "/"),
+		headers: make(http.Header),
+	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(client)
+		}
 	}
 
 	client.Query = &ClientNamespace{client: client, method: http.MethodGet}
@@ -271,6 +312,11 @@ func (client *Client) newRequest(ctx context.Context, method string, key string,
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	for name, values := range client.headers {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
 
 	return req, nil
 }
