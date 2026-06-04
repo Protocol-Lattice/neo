@@ -942,33 +942,6 @@ func RateLimitMiddleware(next neo.Handler) neo.Handler {
 
 ---
 
-## Roadmap
-
-- [x] Query procedures
-- [x] Mutation procedures
-- [x] Subscription procedures
-- [x] Middleware
-- [x] Nested routers
-- [x] Router merge
-- [x] Structured errors
-- [x] Internal error redaction
-- [x] CORS preflight support
-- [x] Server hardening options
-- [x] POST queries
-- [x] Event broker abstraction
-- [x] Robust Go codegen foundation
-- [x] Generated typed Go client
-- [ ] Generated TypeScript client
-- [ ] Redis event broker
-- [ ] NATS event broker
-- [ ] Postgres `LISTEN/NOTIFY` broker
-- [ ] OpenAPI/schema export
-- [ ] Configurable CORS examples
-- [ ] Observability middleware
-- [ ] More production examples
-
----
-
 ## Philosophy
 
 Neo is built around a simple idea:
