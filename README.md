@@ -30,6 +30,7 @@ router.Register("user.create", neo.Mutation(func(ctx context.Context, in CreateU
 - **Middleware**
 - **Event-triggered subscriptions**
 - **Pluggable event broker**
+- **Standard-library NATS broker adapter**
 - **CORS preflight support**
 - **Safe internal error redaction**
 - **POST queries for large payloads**
@@ -279,6 +280,35 @@ Use a custom broker:
 router := neo.NewRouter()
 router.UseEvents(myRedisBroker)
 ```
+
+Use the built-in NATS adapter for multi-process pub/sub:
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/Protocol-Lattice/neo"
+	natsbroker "github.com/Protocol-Lattice/neo/broker/nats"
+)
+
+func main() {
+	router := neo.NewRouter()
+
+	broker := natsbroker.New(natsbroker.Options{
+		Addr:             "127.0.0.1:4222",
+		SubscriberBuffer: 64,
+		Logger:           log.Default(),
+	})
+	router.UseEvents(broker)
+
+	// Register subscriptions/mutations as usual. Any Neo process using the same
+	// NATS subject can publish and receive events across instances.
+}
+```
+
+The NATS adapter publishes events as JSON and decodes subscription messages back into dynamic Go values. It preserves Neo's fire-and-forget event contract: publish errors are logged through `Options.Logger`, and slow local subscribers drop events when their buffer is full. For durable delivery, retries, or outbox semantics, wrap `EventBroker` with application-specific persistence.
 
 The default in-memory bus is intentionally tiny and non-blocking. Slow subscribers do not block mutation handlers. Delivery is best-effort and lossy: if a subscriber buffer is full, new events for that subscriber are dropped. Use a distributed broker with explicit delivery guarantees for production multi-instance systems.
 
@@ -577,10 +607,118 @@ This is the foundation for generated typed clients.
 
 Neo ships with a small `neo-gen` command for generated clients and typed procedure bindings.
 
+Given route registration like this:
+
+```go
+package main
+
+import (
+	"context"
+
+	"github.com/Protocol-Lattice/neo"
+)
+
+type NoInput struct{}
+type GetUserInput struct {
+	ID int `json:"id"`
+}
+type CreateUserInput struct {
+	Name string `json:"name"`
+}
+type User struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+type UserEvent struct {
+	Name string `json:"name"`
+	Data User   `json:"data"`
+}
+
+func buildRouter() *neo.Router {
+	root := neo.NewRouter()
+	users := neo.NewRouter()
+
+	root.Register("healthcheck", neo.Query[NoInput, string](func(ctx context.Context, in NoInput) (string, error) {
+		return "ok", nil
+	}))
+
+	users.Register("getByID", neo.Query[GetUserInput, User](func(ctx context.Context, in GetUserInput) (User, error) {
+		return User{ID: in.ID, Name: "Kamil"}, nil
+	}))
+	users.Register("create", neo.Mutation[CreateUserInput, User](func(ctx context.Context, in CreateUserInput) (User, error) {
+		return User{ID: 1, Name: in.Name}, nil
+	}))
+	users.RegisterSubscription("changes", neo.Subscription[NoInput, UserEvent](func(ctx context.Context, in NoInput) (<-chan UserEvent, error) {
+		out := make(chan UserEvent)
+		return out, nil
+	}))
+
+	root.Nested("user", users)
+	return root
+}
+```
+
+Generate a typed client:
+
+```bash
+go run ./cmd/neo-gen -dir ./examples -out ./examples/neo.gen.go
+```
+
+Use the generated client in application code:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/Protocol-Lattice/neo"
+)
+
+func main() {
+	ctx := context.Background()
+
+	client := NewTypedClient(
+		"http://localhost:8080/neo",
+		neo.WithHeader("Authorization", "Bearer <token>"),
+		neo.WithHeader("X-Trace-ID", "demo-1"),
+	)
+
+	health, err := client.Healthcheck.Call(ctx, NoInput{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("health:", health)
+
+	user, err := client.User.GetByID.Call(ctx, GetUserInput{ID: 1})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("user:", user.Name)
+
+	created, err := client.User.Create.Call(ctx, CreateUserInput{Name: "Neo"})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("created:", created.ID)
+
+	stream, err := client.User.Changes.Subscribe(ctx, NoInput{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for event := range stream {
+		fmt.Printf("event: %#v\n", event)
+	}
+}
+```
+
 The generated client allows usage like:
 
 ```go
-user, err := client.User.Get.Call(ctx, GetUserInput{ID: 1})
+user, err := client.User.GetByID.Call(ctx, GetUserInput{ID: 1})
 ```
 
 Instead of:
@@ -588,7 +726,7 @@ Instead of:
 ```go
 user, err := neo.CallTyped[GetUserInput, User](
 	ctx,
-	client.Query.Procedure("user.get"),
+	client.Query.Procedure("user.getByID"),
 	GetUserInput{ID: 1},
 )
 ```
@@ -599,6 +737,8 @@ Current Go codegen gives you:
 - compile-time checked input/output types
 - typed query and mutation `Call` methods
 - typed subscription `Subscribe` methods
+- `NewTypedClient(addr, opts...)` support for auth/custom headers
+- `NewTypedClientFromClient(client)` for shared custom clients
 
 Future codegen goals:
 
