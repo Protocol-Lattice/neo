@@ -12,15 +12,33 @@ type Event struct {
 	Data  any    `json:"data,omitempty"`
 }
 
-// EventBus is an in-memory pub/sub bus.
+// EventBroker is the pub/sub boundary used by Neo subscriptions.
+//
+// The default implementation is EventBus, an in-memory single-process broker.
+// Production applications that run more than one process should provide an
+// adapter backed by Redis, NATS, Kafka, RabbitMQ, or Postgres LISTEN/NOTIFY.
+//
+// Publish is intentionally fire-and-forget to keep mutations fast and compatible
+// with the original in-memory API. Distributed adapters should handle transient
+// publish failures internally, usually by logging, metrics, retries, or a
+// durable outbox owned by the application.
+type EventBroker interface {
+	Publish(topic string, event any)
+	Subscribe(ctx context.Context, topic string) <-chan any
+}
+
+// EventBus is Neo's default in-memory EventBroker.
 //
 // It is intentionally tiny: good for examples, tests, and single-process apps.
-// For production multi-instance deployments, replace it with Redis, NATS,
-// Kafka, RabbitMQ, or Postgres LISTEN/NOTIFY behind the same Publish/Subscribe shape.
+// It does not distribute events across processes and does not persist messages.
+// For production multi-instance deployments, use Router.UseEvents with a
+// distributed EventBroker adapter.
 type EventBus struct {
 	mu          sync.RWMutex
 	subscribers map[string]map[chan any]struct{}
 }
+
+var _ EventBroker = (*EventBus)(nil)
 
 func NewEventBus() *EventBus {
 	return &EventBus{

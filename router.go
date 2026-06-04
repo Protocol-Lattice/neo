@@ -34,7 +34,7 @@ type Router struct {
 	procedureMiddlewares    map[string][]Middleware
 	subscriptionMiddlewares map[string][]Middleware
 	middlewares             []Middleware
-	events                  *EventBus
+	events                  EventBroker
 	metadata                map[string]ProcedureMeta
 }
 
@@ -88,9 +88,23 @@ func (router *Router) Use(middlewares ...Middleware) {
 	router.middlewares = append(router.middlewares, middlewares...)
 }
 
-func (router *Router) Events() *EventBus {
+func (router *Router) Events() EventBroker {
 	router.ensure()
 	return router.events
+}
+
+// UseEvents replaces the default in-memory EventBus with a custom broker.
+//
+// Use this to plug in Redis, NATS, Kafka, RabbitMQ, Postgres LISTEN/NOTIFY,
+// or another distributed pub/sub implementation. Passing nil restores the
+// default in-memory EventBus. Call UseEvents during setup, before serving.
+func (router *Router) UseEvents(events EventBroker) {
+	router.ensure()
+	if events == nil {
+		router.events = NewEventBus()
+		return
+	}
+	router.events = events
 }
 
 func (router *Router) Metadata() []ProcedureMeta {
