@@ -1,7 +1,9 @@
 package neo
 
 import (
+	"bufio"
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,5 +58,60 @@ func TestWebSocketSubscriptionMissingProcedureReturnsError(t *testing.T) {
 	_, err := client.Subscription.Procedure("missing").SubscribeWebSocket(ctx, nil)
 	if err == nil {
 		t.Fatal("expected missing websocket subscription error")
+	}
+}
+
+func TestReadWebSocketUpgradeResponseParsesHeadersWithoutHTTPReadResponse(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: abc\r\n\r\n"))
+
+	res, err := readWebSocketUpgradeResponse(reader)
+	if err != nil {
+		t.Fatalf("read upgrade response: %v", err)
+	}
+	if res.statusCode != 101 {
+		t.Fatalf("status = %d, want 101", res.statusCode)
+	}
+	if !headerMapContains(res.header, "Upgrade", "websocket") {
+		t.Fatal("missing websocket upgrade header")
+	}
+	if !headerMapContains(res.header, "Connection", "upgrade") {
+		t.Fatal("missing connection upgrade token")
+	}
+	if got := headerMapGet(res.header, "Sec-WebSocket-Accept"); got != "abc" {
+		t.Fatalf("accept = %q, want abc", got)
+	}
+}
+
+func TestReadWebSocketUpgradeResponseRejectsMalformedHeaders(t *testing.T) {
+	cases := map[string]string{
+		"missing crlf":   "HTTP/1.1 101 Switching Protocols\n\r\n",
+		"folded header":  "HTTP/1.1 101 Switching Protocols\r\n Upgrade: websocket\r\n\r\n",
+		"malformed line": "HTTP/1.1 101 Switching Protocols\r\nUpgrade websocket\r\n\r\n",
+		"bad status":     "HTTP/1.1 nope Switching Protocols\r\n\r\n",
+	}
+
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := readWebSocketUpgradeResponse(bufio.NewReader(strings.NewReader(raw)))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestIsValidHTTPHeaderName(t *testing.T) {
+	valid := []string{"Authorization", "X-Trace-ID", "x_custom.header"}
+	for _, name := range valid {
+		if !isValidHTTPHeaderName(name) {
+			t.Fatalf("%q should be valid", name)
+		}
+	}
+
+	invalid := []string{"", "Bad Header", "Bad:Header", "Bad\r\nHeader"}
+	for _, name := range invalid {
+		if isValidHTTPHeaderName(name) {
+			t.Fatalf("%q should be invalid", name)
+		}
 	}
 }

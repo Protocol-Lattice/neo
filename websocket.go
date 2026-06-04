@@ -184,7 +184,15 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 	fmt.Fprintf(&req, "Sec-WebSocket-Key: %s\r\n", key)
 	req.WriteString("Sec-WebSocket-Version: 13\r\n")
 	for name, values := range client.headers {
+		if !isValidHTTPHeaderName(name) {
+			conn.Close()
+			return nil, nil, fmt.Errorf("invalid websocket request header name %q", name)
+		}
 		for _, value := range values {
+			if strings.ContainsAny(value, "\r\n") {
+				conn.Close()
+				return nil, nil, fmt.Errorf("invalid websocket request header value for %q", name)
+			}
 			fmt.Fprintf(&req, "%s: %s\r\n", name, value)
 		}
 	}
@@ -196,27 +204,158 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 	}
 
 	reader := bufio.NewReader(conn)
-	res, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	res, err := readWebSocketUpgradeResponse(reader)
 	if err != nil {
 		conn.Close()
 		return nil, nil, err
 	}
-	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusSwitchingProtocols {
+	if res.statusCode != http.StatusSwitchingProtocols {
 		conn.Close()
-		return nil, nil, fmt.Errorf("websocket upgrade failed with status %d", res.StatusCode)
+		return nil, nil, fmt.Errorf("websocket upgrade failed with status %d", res.statusCode)
 	}
-	if !headerContains(res.Header, "Upgrade", "websocket") || !headerContains(res.Header, "Connection", "upgrade") {
+	if !headerMapContains(res.header, "Upgrade", "websocket") || !headerMapContains(res.header, "Connection", "upgrade") {
 		conn.Close()
 		return nil, nil, errors.New("websocket upgrade response missing upgrade headers")
 	}
-	if got, want := res.Header.Get("Sec-WebSocket-Accept"), webSocketAccept(key); got != want {
+	if got, want := headerMapGet(res.header, "Sec-WebSocket-Accept"), webSocketAccept(key); got != want {
 		conn.Close()
 		return nil, nil, errors.New("websocket upgrade response has invalid accept key")
 	}
 
 	return conn, reader, nil
+}
+
+type webSocketUpgradeResponse struct {
+	statusCode int
+	header     map[string][]string
+}
+
+func readWebSocketUpgradeResponse(reader *bufio.Reader) (webSocketUpgradeResponse, error) {
+	const (
+		maxStatusLineBytes = 8 << 10
+		maxHeaderLineBytes = 8 << 10
+		maxHeaderBytes     = 64 << 10
+		maxHeaderLines     = 100
+	)
+
+	statusLine, n, err := readLimitedHTTPLine(reader, maxStatusLineBytes)
+	if err != nil {
+		return webSocketUpgradeResponse{}, fmt.Errorf("read websocket upgrade status: %w", err)
+	}
+	if !strings.HasPrefix(statusLine, "HTTP/1.") {
+		return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has invalid HTTP status line")
+	}
+
+	parts := strings.SplitN(statusLine, " ", 3)
+	if len(parts) < 2 {
+		return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has malformed HTTP status line")
+	}
+	statusCode, err := parseHTTPStatusCode(parts[1])
+	if err != nil {
+		return webSocketUpgradeResponse{}, err
+	}
+
+	res := webSocketUpgradeResponse{
+		statusCode: statusCode,
+		header:     make(map[string][]string),
+	}
+
+	total := n
+	for lines := 0; lines < maxHeaderLines; lines++ {
+		line, n, err := readLimitedHTTPLine(reader, maxHeaderLineBytes)
+		if err != nil {
+			return webSocketUpgradeResponse{}, fmt.Errorf("read websocket upgrade header: %w", err)
+		}
+		total += n
+		if total > maxHeaderBytes {
+			return webSocketUpgradeResponse{}, errors.New("websocket upgrade response headers too large")
+		}
+		if line == "" {
+			return res, nil
+		}
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			return webSocketUpgradeResponse{}, errors.New("websocket upgrade response contains folded header line")
+		}
+
+		name, value, ok := strings.Cut(line, ":")
+		if !ok {
+			return webSocketUpgradeResponse{}, errors.New("websocket upgrade response contains malformed header line")
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || strings.ContainsAny(name, " \t\r\n") {
+			return webSocketUpgradeResponse{}, errors.New("websocket upgrade response contains invalid header name")
+		}
+
+		key := strings.ToLower(name)
+		res.header[key] = append(res.header[key], strings.TrimSpace(value))
+	}
+
+	return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has too many headers")
+}
+
+func readLimitedHTTPLine(reader *bufio.Reader, limit int) (string, int, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", len(line), err
+	}
+	if len(line) > limit {
+		return "", len(line), errors.New("HTTP line too long")
+	}
+	if !strings.HasSuffix(line, "\r\n") {
+		return "", len(line), errors.New("HTTP line missing CRLF terminator")
+	}
+	return strings.TrimSuffix(line, "\r\n"), len(line), nil
+}
+
+func parseHTTPStatusCode(value string) (int, error) {
+	if len(value) != 3 {
+		return 0, errors.New("websocket upgrade response has invalid HTTP status code")
+	}
+	code := 0
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return 0, errors.New("websocket upgrade response has invalid HTTP status code")
+		}
+		code = code*10 + int(ch-'0')
+	}
+	return code, nil
+}
+
+func headerMapGet(header map[string][]string, name string) string {
+	values := header[strings.ToLower(name)]
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func headerMapContains(header map[string][]string, name string, value string) bool {
+	for _, field := range header[strings.ToLower(name)] {
+		for _, part := range strings.Split(field, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isValidHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, ch := range name {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= 'A' && ch <= 'Z':
+		case ch >= '0' && ch <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", ch):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isWebSocketRequest(r *http.Request) bool {
