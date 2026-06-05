@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Neo is a lightweight, type-friendly, tRPC-style RPC framework for Go backends."
+    >
+    <title>Neo - Type-Friendly RPC for Go</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #f5f2e9;
+        --muted: #b7b2a7;
+        --dim: #837f77;
+        --paper: #10110f;
+        --panel: #181916;
+        --panel-2: #22231e;
+        --line: rgba(245, 242, 233, 0.13);
+        --line-strong: rgba(245, 242, 233, 0.24);
+        --green: #64f29a;
+        --green-2: #1fd170;
+        --amber: #f4bf5f;
+        --coral: #ff7b6f;
+        --blue: #86b7ff;
+        --shadow: rgba(0, 0, 0, 0.45);
+        --max: 1180px;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        font-size: 16px;
+        letter-spacing: 0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(180deg, rgba(100, 242, 154, 0.07), transparent 430px),
+          radial-gradient(circle at 70% 24%, rgba(244, 191, 95, 0.08), transparent 280px),
+          var(--paper);
+        color: var(--ink);
+      }
+
+      body::before {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        content: "";
+        background-image:
+          linear-gradient(rgba(245, 242, 233, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(245, 242, 233, 0.035) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: linear-gradient(to bottom, black, transparent 72%);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      .site-header {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        width: min(100% - 48px, var(--max));
+        height: 76px;
+        margin: 0 auto;
+      }
+
+      .brand-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 800;
+      }
+
+      .mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid rgba(100, 242, 154, 0.55);
+        border-radius: 8px;
+        background: #121511;
+        color: var(--green);
+        box-shadow: 0 0 24px rgba(100, 242, 154, 0.18);
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .nav a {
+        padding: 10px 12px;
+        border-radius: 6px;
+        transition: color 160ms ease, background 160ms ease;
+      }
+
+      .nav a:hover,
+      .nav a:focus-visible {
+        background: rgba(245, 242, 233, 0.08);
+        color: var(--ink);
+        outline: none;
+      }
+
+      .hero {
+        position: relative;
+        display: grid;
+        min-height: calc(100svh - 120px);
+        overflow: hidden;
+        padding: 88px 0 28px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .hero-inner {
+        display: grid;
+        grid-template-columns: minmax(0, 0.85fr) minmax(440px, 1.15fr);
+        gap: 56px;
+        align-items: center;
+        width: min(100% - 48px, var(--max));
+        margin: 0 auto;
+      }
+
+      .hero-copy {
+        min-width: 0;
+        max-width: 560px;
+        animation: rise 650ms ease both;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 18px;
+        color: var(--green);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.84rem;
+      }
+
+      .eyebrow::before {
+        width: 24px;
+        height: 1px;
+        content: "";
+        background: var(--green);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 22px;
+        font-size: 5rem;
+        line-height: 0.92;
+      }
+
+      .hero-copy h1 span {
+        display: block;
+        color: var(--muted);
+        font-size: 2.25rem;
+        font-weight: 700;
+        line-height: 1.05;
+      }
+
+      .lead {
+        max-width: 530px;
+        margin-bottom: 30px;
+        color: var(--muted);
+        font-size: 1.18rem;
+        line-height: 1.65;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 46px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        padding: 0 18px;
+        background: rgba(245, 242, 233, 0.07);
+        color: var(--ink);
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          border-color 160ms ease,
+          background 160ms ease,
+          color 160ms ease;
+      }
+
+      .button.primary {
+        border-color: rgba(100, 242, 154, 0.7);
+        background: var(--green);
+        color: #09100b;
+        font-weight: 800;
+      }
+
+      .button:hover,
+      .button:focus-visible {
+        border-color: rgba(100, 242, 154, 0.72);
+        background: rgba(100, 242, 154, 0.13);
+        color: var(--green);
+        outline: none;
+        transform: translateY(-2px);
+      }
+
+      .button.primary:hover,
+      .button.primary:focus-visible {
+        background: #7dffad;
+        color: #09100b;
+      }
+
+      .install-row {
+        display: flex;
+        max-width: 560px;
+        margin-top: 26px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: rgba(24, 25, 22, 0.84);
+      }
+
+      .install-row code {
+        flex: 1;
+        min-width: 0;
+        padding: 14px 16px;
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.88rem;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+
+      .copy-button {
+        flex: 0 0 auto;
+        border: 0;
+        border-left: 1px solid var(--line);
+        padding: 0 16px;
+        background: rgba(245, 242, 233, 0.04);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .copy-button:hover,
+      .copy-button:focus-visible {
+        color: var(--green);
+        outline: none;
+      }
+
+      .hero-stage {
+        position: relative;
+        min-width: 0;
+        animation: rise 760ms 110ms ease both;
+      }
+
+      .signal-rail {
+        position: absolute;
+        inset: 8% auto 8% -34px;
+        width: 1px;
+        background: linear-gradient(to bottom, transparent, var(--green), transparent);
+        opacity: 0.75;
+      }
+
+      .signal-rail::before,
+      .signal-rail::after {
+        position: absolute;
+        left: -4px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        content: "";
+        background: var(--green);
+        box-shadow: 0 0 20px rgba(100, 242, 154, 0.72);
+        animation: pulse 2100ms ease-in-out infinite;
+      }
+
+      .signal-rail::before {
+        top: 16%;
+      }
+
+      .signal-rail::after {
+        bottom: 24%;
+        animation-delay: 700ms;
+      }
+
+      .terminal {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background: rgba(18, 19, 16, 0.94);
+        box-shadow: 0 26px 80px var(--shadow);
+      }
+
+      .terminal-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 46px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .traffic {
+        display: flex;
+        gap: 8px;
+      }
+
+      .traffic span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .traffic span:nth-child(1) {
+        background: var(--coral);
+      }
+
+      .traffic span:nth-child(2) {
+        background: var(--amber);
+      }
+
+      .traffic span:nth-child(3) {
+        background: var(--green);
+      }
+
+      .file-name {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+
+      .tab-list {
+        display: flex;
+        gap: 6px;
+        padding: 10px 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tab {
+        border: 1px solid transparent;
+        border-bottom: 0;
+        border-radius: 6px 6px 0 0;
+        padding: 9px 12px;
+        background: transparent;
+        color: var(--dim);
+        cursor: pointer;
+        font-size: 0.84rem;
+      }
+
+      .tab[aria-selected="true"] {
+        border-color: var(--line);
+        background: rgba(245, 242, 233, 0.05);
+        color: var(--ink);
+      }
+
+      .tab:focus-visible {
+        outline: 2px solid rgba(100, 242, 154, 0.8);
+        outline-offset: -2px;
+      }
+
+      .code-window {
+        min-height: 370px;
+        padding: 22px;
+      }
+
+      .code-pane {
+        display: none;
+      }
+
+      .code-pane.active {
+        display: block;
+      }
+
+      pre {
+        margin: 0;
+        overflow-x: auto;
+        color: #e7e1d6;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.86rem;
+        line-height: 1.62;
+      }
+
+      .token-fn,
+      .token-type {
+        color: var(--green);
+      }
+
+      .token-str {
+        color: var(--amber);
+      }
+
+      .token-key {
+        color: var(--blue);
+      }
+
+      .token-comment {
+        color: #858077;
+      }
+
+      .stream {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        border-top: 1px solid var(--line);
+      }
+
+      .stream-item {
+        min-width: 0;
+        padding: 16px;
+      }
+
+      .stream-item + .stream-item {
+        border-left: 1px solid var(--line);
+      }
+
+      .stream-label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--dim);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+      }
+
+      .stream code {
+        color: var(--green);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.84rem;
+        white-space: normal;
+      }
+
+      .section {
+        width: min(100% - 48px, var(--max));
+        margin: 0 auto;
+        padding: 92px 0;
+      }
+
+      .section + .section {
+        border-top: 1px solid var(--line);
+      }
+
+      .hero + .section {
+        padding-top: 28px;
+      }
+
+      .section-kicker {
+        margin-bottom: 12px;
+        color: var(--green);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+
+      .section h2 {
+        max-width: 780px;
+        margin-bottom: 18px;
+        font-size: 3rem;
+        line-height: 1.02;
+      }
+
+      .section-intro {
+        max-width: 700px;
+        color: var(--muted);
+        font-size: 1.08rem;
+        line-height: 1.7;
+      }
+
+      .workflow {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        margin-top: 46px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .workflow-step {
+        min-height: 210px;
+        padding: 26px 22px;
+      }
+
+      .workflow-step + .workflow-step {
+        border-left: 1px solid var(--line);
+      }
+
+      .number {
+        display: block;
+        margin-bottom: 32px;
+        color: var(--dim);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      .workflow-step h3 {
+        margin-bottom: 12px;
+        font-size: 1.12rem;
+      }
+
+      .workflow-step p {
+        margin-bottom: 0;
+        color: var(--muted);
+        line-height: 1.62;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+        gap: 64px;
+        align-items: start;
+      }
+
+      .feature-list {
+        display: grid;
+        gap: 0;
+        margin-top: 30px;
+        border-top: 1px solid var(--line);
+      }
+
+      .feature-row {
+        display: grid;
+        grid-template-columns: 190px 1fr;
+        gap: 24px;
+        padding: 22px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .feature-row strong {
+        color: var(--ink);
+      }
+
+      .feature-row span {
+        color: var(--muted);
+        line-height: 1.62;
+      }
+
+      .protocol-panel {
+        position: sticky;
+        top: 28px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--panel);
+        box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+      }
+
+      .protocol-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .protocol-head strong {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.85rem;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--green);
+        font-size: 0.82rem;
+      }
+
+      .status::before {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        content: "";
+        background: var(--green);
+        box-shadow: 0 0 16px rgba(100, 242, 154, 0.9);
+      }
+
+      .protocol-body {
+        padding: 18px;
+      }
+
+      .route {
+        display: grid;
+        grid-template-columns: 96px 1fr;
+        gap: 12px;
+        align-items: center;
+        padding: 14px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .route:last-child {
+        border-bottom: 0;
+      }
+
+      .method {
+        display: inline-flex;
+        width: 86px;
+        min-height: 30px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        color: #07100a;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.76rem;
+        font-weight: 800;
+      }
+
+      .method.get {
+        background: var(--green);
+      }
+
+      .method.post {
+        background: var(--amber);
+      }
+
+      .method.ws {
+        background: var(--blue);
+      }
+
+      .route code {
+        min-width: 0;
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+
+      .quickstart {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
+        gap: 38px;
+        align-items: stretch;
+        margin-top: 42px;
+      }
+
+      .code-card,
+      .note-panel {
+        min-width: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: rgba(24, 25, 22, 0.9);
+      }
+
+      .code-card {
+        overflow: hidden;
+      }
+
+      .code-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 15px 18px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+
+      .code-card pre {
+        padding: 22px;
+      }
+
+      .note-panel {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 32px;
+        padding: 24px;
+      }
+
+      .note-panel p {
+        color: var(--muted);
+        line-height: 1.66;
+      }
+
+      .checks {
+        display: grid;
+        gap: 14px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .checks li {
+        display: flex;
+        gap: 12px;
+        color: var(--ink);
+      }
+
+      .checks li::before {
+        flex: 0 0 auto;
+        width: 7px;
+        height: 7px;
+        margin-top: 9px;
+        border-radius: 50%;
+        content: "";
+        background: var(--green);
+      }
+
+      .final-cta {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 32px;
+        align-items: end;
+        padding-bottom: 110px;
+      }
+
+      .final-cta h2 {
+        margin-bottom: 0;
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(24px);
+        transition: opacity 600ms ease, transform 600ms ease;
+      }
+
+      .reveal.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .hero + .section.reveal {
+        opacity: 1;
+        transform: none;
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(22px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.45;
+          transform: scale(0.84);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      @media (max-width: 1020px) {
+        .hero {
+          min-height: auto;
+          padding-bottom: 54px;
+        }
+
+        .hero-inner,
+        .split,
+        .quickstart {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-copy {
+          max-width: 720px;
+        }
+
+        .hero-stage {
+          max-width: 760px;
+        }
+
+        .workflow {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .workflow-step:nth-child(3) {
+          border-left: 0;
+        }
+
+        .workflow-step:nth-child(n + 3) {
+          border-top: 1px solid var(--line);
+        }
+
+        .protocol-panel {
+          position: static;
+        }
+
+        .final-cta {
+          grid-template-columns: 1fr;
+          align-items: start;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .site-header {
+          width: min(100% - 32px, var(--max));
+          height: 68px;
+        }
+
+        .nav {
+          display: none;
+        }
+
+        .hero {
+          padding: 78px 0 24px;
+        }
+
+        .hero-inner,
+        .section {
+          width: min(100% - 32px, var(--max));
+        }
+
+        .hero-inner {
+          gap: 26px;
+        }
+
+        h1 {
+          font-size: 3.05rem;
+        }
+
+        .hero-copy h1 span {
+          font-size: 1.36rem;
+        }
+
+        .lead,
+        .section-intro {
+          font-size: 1rem;
+        }
+
+        .install-row {
+          width: 100%;
+          max-width: 100%;
+          flex-direction: row;
+        }
+
+        .install-row code {
+          padding: 14px 12px;
+          font-size: 0.74rem;
+        }
+
+        .copy-button {
+          min-height: auto;
+          border-top: 0;
+          border-left: 1px solid var(--line);
+          padding: 0 10px;
+          font-size: 0.86rem;
+        }
+
+        .signal-rail {
+          display: none;
+        }
+
+        .terminal-bar {
+          min-height: 42px;
+          align-items: center;
+          flex-direction: row;
+          padding: 0 12px;
+        }
+
+        .file-name {
+          font-size: 0.72rem;
+        }
+
+        .tab-list {
+          overflow-x: auto;
+        }
+
+        .tab {
+          padding: 8px 10px;
+          font-size: 0.78rem;
+        }
+
+        .code-window {
+          height: 132px;
+          min-height: 132px;
+          max-height: 132px;
+          overflow: auto;
+          padding: 16px;
+        }
+
+        pre {
+          font-size: 0.78rem;
+        }
+
+        .stream {
+          display: none;
+        }
+
+        .section {
+          padding: 70px 0;
+        }
+
+        .hero + .section {
+          padding-top: 18px;
+        }
+
+        .section h2 {
+          font-size: 2.2rem;
+        }
+
+        .workflow {
+          grid-template-columns: 1fr;
+        }
+
+        .workflow-step,
+        .workflow-step:nth-child(3) {
+          border-left: 0;
+        }
+
+        .workflow-step + .workflow-step {
+          border-top: 1px solid var(--line);
+        }
+
+        .feature-row {
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+
+        .route {
+          grid-template-columns: 1fr;
+        }
+
+        .quickstart {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+          transition-duration: 1ms !important;
+        }
+
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header" aria-label="Primary">
+      <a class="brand-link" href="#top" aria-label="Neo home">
+        <span class="mark" aria-hidden="true">N</span>
+        <span>Neo</span>
+      </a>
+      <nav class="nav" aria-label="Page sections">
+        <a href="#workflow">Workflow</a>
+        <a href="#protocol">Protocol</a>
+        <a href="#quickstart">Quick start</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">github.com/Protocol-Lattice/neo</p>
+            <h1 id="hero-title">Neo <span>Type-friendly RPC for Go backends.</span></h1>
+            <p class="lead">
+              Build procedure-based APIs with queries, mutations, subscriptions,
+              middleware, nested routers, generated clients, and a tiny Go-first
+              mental model.
+            </p>
+            <div class="actions">
+              <a class="button primary" href="#quickstart">Start building</a>
+              <a class="button" href="#protocol">See the protocol</a>
+            </div>
+            <div class="install-row" aria-label="Install command">
+              <code id="install-command">go get github.com/Protocol-Lattice/neo</code>
+              <button class="copy-button" type="button" data-copy="#install-command">
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div class="hero-stage" aria-label="Neo router code sample">
+            <div class="signal-rail" aria-hidden="true"></div>
+            <div class="terminal">
+              <div class="terminal-bar">
+                <div class="traffic" aria-hidden="true">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <span class="file-name">internal/api/router.go</span>
+              </div>
+              <div class="tab-list" role="tablist" aria-label="Procedure examples">
+                <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="pane-query" id="tab-query" data-tab="query">
+                  Query
+                </button>
+                <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="pane-mutation" id="tab-mutation" data-tab="mutation">
+                  Mutation
+                </button>
+                <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="pane-subscription" id="tab-subscription" data-tab="subscription">
+                  Subscription
+                </button>
+              </div>
+              <div class="code-window">
+                <div class="code-pane active" id="pane-query" role="tabpanel" aria-labelledby="tab-query" data-pane="query">
+<pre><code>router := <span class="token-fn">neo.NewRouter</span>()
+
+router.Register(<span class="token-str">"user.get"</span>, <span class="token-fn">neo.Query</span>(
+  func(ctx context.Context, in <span class="token-type">GetUserInput</span>) (<span class="token-type">User</span>, error) {
+    return db.GetUser(ctx, in.ID)
+  },
+))
+
+router.ListenAndServe(neo.ServerOptions{
+  Addr:   <span class="token-str">":8080"</span>,
+  Prefix: <span class="token-str">"/neo/"</span>,
+})</code></pre>
+                </div>
+                <div class="code-pane" id="pane-mutation" role="tabpanel" aria-labelledby="tab-mutation" data-pane="mutation">
+<pre><code>router.Register(<span class="token-str">"user.create"</span>, <span class="token-fn">neo.Mutation</span>(
+  func(ctx context.Context, in <span class="token-type">CreateUserInput</span>) (<span class="token-type">User</span>, error) {
+    user, err := db.CreateUser(ctx, in.Name)
+    if err != nil {
+      return <span class="token-type">User</span>{}, err
+    }
+
+    router.Events().Publish(<span class="token-str">"user.changes"</span>, user)
+    return user, nil
+  },
+))</code></pre>
+                </div>
+                <div class="code-pane" id="pane-subscription" role="tabpanel" aria-labelledby="tab-subscription" data-pane="subscription">
+<pre><code>router.RegisterSubscription(<span class="token-str">"user.changes"</span>, <span class="token-fn">neo.Subscription</span>(
+  func(ctx context.Context, in <span class="token-type">NoInput</span>) (&lt;-chan <span class="token-type">UserEvent</span>, error) {
+    raw := router.Events().Subscribe(ctx, <span class="token-str">"user.changes"</span>)
+    return mapEvents[<span class="token-type">UserEvent</span>](ctx, raw), nil
+  },
+))
+
+<span class="token-comment">// NDJSON or WebSocket clients receive the same envelope.</span></code></pre>
+                </div>
+              </div>
+              <div class="stream" aria-label="Request and response examples">
+                <div class="stream-item">
+                  <span class="stream-label">Request</span>
+                  <code>GET /neo/user.get?input={"id":1}</code>
+                </div>
+                <div class="stream-item">
+                  <span class="stream-label">Response</span>
+                  <code>{"result":{"id":1,"name":"Neo"}}</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="workflow" aria-labelledby="workflow-title">
+        <p class="section-kicker">One router, three procedure kinds</p>
+        <h2 id="workflow-title">Keep the backend shape close to the product shape.</h2>
+        <p class="section-intro">
+          Neo organizes application behavior around typed procedures instead of
+          scattered route handlers. Register the operation once, then call it
+          from Go, generated Go clients, or generated TypeScript clients.
+        </p>
+        <div class="workflow">
+          <article class="workflow-step">
+            <span class="number">01</span>
+            <h3>Register</h3>
+            <p>Define query, mutation, and subscription handlers with typed inputs and outputs.</p>
+          </article>
+          <article class="workflow-step">
+            <span class="number">02</span>
+            <h3>Compose</h3>
+            <p>Use middleware, nested routers, and router merge to grow APIs by module.</p>
+          </article>
+          <article class="workflow-step">
+            <span class="number">03</span>
+            <h3>Serve</h3>
+            <p>Mount Neo into your mux or run it with hardened server options.</p>
+          </article>
+          <article class="workflow-step">
+            <span class="number">04</span>
+            <h3>Generate</h3>
+            <p>Use metadata and neo-gen for typed Go and TypeScript client surfaces.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section split reveal" id="protocol" aria-labelledby="protocol-title">
+        <div>
+          <p class="section-kicker">HTTP where it fits, streams where it matters</p>
+          <h2 id="protocol-title">A small RPC surface that still speaks browser.</h2>
+          <p class="section-intro">
+            Queries can travel over GET or POST, mutations use POST, and
+            subscriptions stream through NDJSON or WebSocket with a shared JSON
+            envelope.
+          </p>
+          <div class="feature-list">
+            <div class="feature-row">
+              <strong>Typed handlers</strong>
+              <span>Generic Go procedures keep request and response types visible at registration time.</span>
+            </div>
+            <div class="feature-row">
+              <strong>Middleware</strong>
+              <span>Wrap procedure execution for auth, logging, rate limits, tracing, and recovery.</span>
+            </div>
+            <div class="feature-row">
+              <strong>Event broker</strong>
+              <span>Start with the in-memory bus, then swap in NATS or any broker implementing Neo's tiny interface.</span>
+            </div>
+            <div class="feature-row">
+              <strong>Safe errors</strong>
+              <span>Machine-readable codes reach the client while internal Go errors stay server-side.</span>
+            </div>
+          </div>
+        </div>
+        <aside class="protocol-panel" aria-label="Neo protocol routes">
+          <div class="protocol-head">
+            <strong>/neo</strong>
+            <span class="status">ready</span>
+          </div>
+          <div class="protocol-body">
+            <div class="route">
+              <span class="method get">GET</span>
+              <code>/user.get?input={"id":1}</code>
+            </div>
+            <div class="route">
+              <span class="method post">POST</span>
+              <code>/user.create {"input":{"name":"Neo"}}</code>
+            </div>
+            <div class="route">
+              <span class="method get">NDJSON</span>
+              <code>/user.changes Accept: application/x-ndjson</code>
+            </div>
+            <div class="route">
+              <span class="method ws">WS</span>
+              <code>/user.changes Upgrade: websocket</code>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section reveal" id="quickstart" aria-labelledby="quickstart-title">
+        <p class="section-kicker">Quick start</p>
+        <h2 id="quickstart-title">Ship the first endpoint in a few lines.</h2>
+        <p class="section-intro">
+          Neo uses the standard library HTTP stack, so it can own the server or
+          sit beside your existing handlers.
+        </p>
+        <div class="quickstart">
+          <div class="code-card">
+            <div class="code-title">
+              <span>main.go</span>
+              <span>query procedure</span>
+            </div>
+<pre><code>package main
+
+import (
+  <span class="token-str">"context"</span>
+  <span class="token-str">"log"</span>
+
+  <span class="token-str">"github.com/Protocol-Lattice/neo"</span>
+)
+
+type HelloInput struct {
+  Name string `json:"name"`
+}
+
+type HelloOutput struct {
+  Message string `json:"message"`
+}
+
+func main() {
+  router := <span class="token-fn">neo.NewRouter</span>()
+
+  router.Register(<span class="token-str">"hello"</span>, <span class="token-fn">neo.Query</span>(
+    func(ctx context.Context, in HelloInput) (HelloOutput, error) {
+      return HelloOutput{Message: <span class="token-str">"Hello, "</span> + in.Name}, nil
+    },
+  ))
+
+  log.Fatal(router.ListenAndServe(neo.ServerOptions{
+    Addr:   <span class="token-str">":8080"</span>,
+    Prefix: <span class="token-str">"/neo/"</span>,
+  }))
+}</code></pre>
+          </div>
+          <aside class="note-panel">
+            <div>
+              <h3>Use the same shape everywhere.</h3>
+              <p>
+                Procedure metadata powers generated clients, so application code
+                can call typed namespaces instead of hand-building URLs.
+              </p>
+            </div>
+            <ul class="checks">
+              <li>Generated Go client namespaces</li>
+              <li>Generated TypeScript interfaces from Go structs</li>
+              <li>Typed NDJSON and WebSocket subscription helpers</li>
+              <li>Custom fetch, WebSocket, and header options</li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section final-cta reveal" aria-labelledby="final-title">
+        <div>
+          <p class="section-kicker">Install Neo</p>
+          <h2 id="final-title">Procedure-first APIs without leaving idiomatic Go.</h2>
+        </div>
+        <div class="actions">
+          <a class="button primary" href="#top">Back to top</a>
+          <a class="button" href="https://github.com/Protocol-Lattice/neo">Open README</a>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const tabs = document.querySelectorAll("[data-tab]");
+      const panes = document.querySelectorAll("[data-pane]");
+
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const active = tab.dataset.tab;
+
+          tabs.forEach((item) => {
+            item.setAttribute("aria-selected", String(item === tab));
+          });
+
+          panes.forEach((pane) => {
+            pane.classList.toggle("active", pane.dataset.pane === active);
+          });
+        });
+      });
+
+      document.querySelectorAll("[data-copy]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const target = document.querySelector(button.dataset.copy);
+          if (!target) return;
+
+          const text = target.textContent.trim();
+          let copied = false;
+
+          try {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(text);
+              copied = true;
+            }
+          } catch {
+            copied = false;
+          }
+
+          if (!copied) {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.setAttribute("readonly", "");
+            textarea.style.position = "fixed";
+            textarea.style.left = "-9999px";
+            document.body.appendChild(textarea);
+            textarea.select();
+            copied = document.execCommand("copy");
+            textarea.remove();
+          }
+
+          button.textContent = copied ? "Copied" : "Select";
+          setTimeout(() => {
+            button.textContent = "Copy";
+          }, 1200);
+        });
+      });
+
+      const revealItems = document.querySelectorAll(".reveal");
+
+      if ("IntersectionObserver" in window) {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("visible");
+                observer.unobserve(entry.target);
+              }
+            });
+          },
+          { threshold: 0.18 }
+        );
+
+        revealItems.forEach((item) => observer.observe(item));
+      } else {
+        revealItems.forEach((item) => item.classList.add("visible"));
+      }
+    </script>
+  </body>
+</html>
