@@ -138,7 +138,9 @@ func (broker *Broker) Publish(topic string, event any) {
 		broker.logf("nats publish connect %q: %v", topic, err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	if _, err := fmt.Fprintf(rw, "PUB %s %d\r\n", topic, len(payload)); err != nil {
 		broker.logf("nats publish command %q: %v", topic, err)
@@ -192,7 +194,9 @@ func (broker *Broker) subscribe(ctx context.Context, topic string, out chan any)
 		broker.logf("nats subscribe connect %q: %v", topic, err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	sid := broker.nextSID.Add(1)
 	if _, err := fmt.Fprintf(rw, "SUB %s %d\r\n", topic, sid); err != nil {

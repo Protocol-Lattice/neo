@@ -178,3 +178,51 @@ func TestClientSubscribeReadsNDJSONStream(t *testing.T) {
 		t.Fatal("timed out waiting for stream value")
 	}
 }
+
+func TestDecodeClientStreamStopsOnDecodeError(t *testing.T) {
+	raw := make(chan any, 2)
+	raw <- map[string]any{"message": map[string]any{"nested": true}}
+	raw <- testOutput{Message: "unreachable"}
+	close(raw)
+
+	stream := decodeClientStream[testOutput](context.Background(), raw)
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("stream is open, want closed after decode error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stream to close")
+	}
+}
+
+func TestDecodeClientStreamClosesNilStream(t *testing.T) {
+	stream := decodeClientStream[testOutput](context.TODO(), nil)
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("stream is open, want closed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for nil stream to close")
+	}
+}
+
+func TestDecodeClientStreamStopsWaitingOnContextCancel(t *testing.T) {
+	raw := make(chan any)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stream := decodeClientStream[testOutput](ctx, raw)
+	cancel()
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("stream is open, want closed after context cancel")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for canceled stream to close")
+	}
+}

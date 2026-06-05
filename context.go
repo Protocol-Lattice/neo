@@ -1,0 +1,12 @@
+package neo
+
+import "context"
+
+// ensureContext keeps defensive framework paths from blocking or panicking when
+// a caller violates the Go convention that contexts must be non-nil.
+func ensureContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.TODO()
+	}
+	return ctx
+}

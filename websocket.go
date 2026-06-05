@@ -34,24 +34,7 @@ func SubscribeWebSocketTyped[In, Out any](ctx context.Context, procedure *Client
 		return nil, err
 	}
 
-	out := make(chan Out)
-	go func() {
-		defer close(out)
-		for value := range raw {
-			decoded, err := decodeClientValue[Out](value)
-			if err != nil {
-				return
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case out <- decoded:
-			}
-		}
-	}()
-
-	return out, nil
+	return decodeClientStream[Out](ctx, raw), nil
 }
 
 // SubscribeWebSocket opens this procedure as a WebSocket subscription.
@@ -60,6 +43,8 @@ func (procedure *ClientProcedure) SubscribeWebSocket(ctx context.Context, input 
 }
 
 func (client *Client) subscribeWebSocket(ctx context.Context, key string, input any) (<-chan any, error) {
+	ctx = ensureContext(ctx)
+
 	httpURL, err := client.subscriptionURL(key, input)
 	if err != nil {
 		return nil, err
@@ -73,8 +58,21 @@ func (client *Client) subscribeWebSocket(ctx context.Context, key string, input 
 
 	out := make(chan any)
 	go func() {
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 		defer close(out)
+
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = conn.Close()
+			case <-done:
+			}
+		}()
+		defer close(done)
+
 		for {
 			payload, opcode, err := readWebSocketFrame(reader, false)
 			if err != nil {
@@ -159,7 +157,7 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 		serverName := parsed.Hostname()
 		tlsConn := tls.Client(rawConn, &tls.Config{ServerName: serverName})
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			rawConn.Close()
+			_ = rawConn.Close()
 			return nil, nil, err
 		}
 		conn = tlsConn
@@ -167,7 +165,7 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 
 	key, err := newWebSocketKey()
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 
@@ -185,12 +183,12 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 	req.WriteString("Sec-WebSocket-Version: 13\r\n")
 	for name, values := range client.headers {
 		if !isValidHTTPHeaderName(name) {
-			conn.Close()
+			_ = conn.Close()
 			return nil, nil, fmt.Errorf("invalid websocket request header name %q", name)
 		}
 		for _, value := range values {
 			if strings.ContainsAny(value, "\r\n") {
-				conn.Close()
+				_ = conn.Close()
 				return nil, nil, fmt.Errorf("invalid websocket request header value for %q", name)
 			}
 			fmt.Fprintf(&req, "%s: %s\r\n", name, value)
@@ -199,27 +197,27 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 	req.WriteString("\r\n")
 
 	if _, err := conn.Write(req.Bytes()); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 
 	reader := bufio.NewReader(conn)
 	res, err := readWebSocketUpgradeResponse(reader)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 
 	if res.statusCode != http.StatusSwitchingProtocols {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, fmt.Errorf("websocket upgrade failed with status %d", res.statusCode)
 	}
 	if !headerMapContains(res.header, "Upgrade", "websocket") || !headerMapContains(res.header, "Connection", "upgrade") {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, errors.New("websocket upgrade response missing upgrade headers")
 	}
 	if got, want := headerMapGet(res.header, "Sec-WebSocket-Accept"), webSocketAccept(key); got != want {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, errors.New("websocket upgrade response has invalid accept key")
 	}
 
@@ -382,7 +380,9 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request, stream <-chan any) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	accept := webSocketAccept(r.Header.Get("Sec-WebSocket-Key"))
 	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\n")

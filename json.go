@@ -36,7 +36,9 @@ func readInput(r *http.Request) (any, error) {
 		return input, nil
 
 	case http.MethodPost:
-		defer r.Body.Close()
+		defer func() {
+			_ = r.Body.Close()
+		}()
 
 		var req Request
 		if err := decodeSingleJSON(r.Body, &req); err != nil {

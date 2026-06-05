@@ -99,10 +99,14 @@ func BenchmarkPlainQueryHTTPServer(b *testing.B) {
 
 		var rpcRes Response
 		if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
-			res.Body.Close()
+			if closeErr := res.Body.Close(); closeErr != nil {
+				b.Fatalf("close response body: %v", closeErr)
+			}
 			b.Fatal(err)
 		}
-		res.Body.Close()
+		if err := res.Body.Close(); err != nil {
+			b.Fatalf("close response body: %v", err)
+		}
 
 		if res.StatusCode != http.StatusOK {
 			b.Fatalf("status = %d", res.StatusCode)
@@ -179,10 +183,14 @@ func BenchmarkPlainMutationHTTPServer(b *testing.B) {
 
 		var rpcRes Response
 		if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
-			res.Body.Close()
+			if closeErr := res.Body.Close(); closeErr != nil {
+				b.Fatalf("close response body: %v", closeErr)
+			}
 			b.Fatal(err)
 		}
-		res.Body.Close()
+		if err := res.Body.Close(); err != nil {
+			b.Fatalf("close response body: %v", err)
+		}
 
 		if res.StatusCode != http.StatusOK {
 			b.Fatalf("status = %d", res.StatusCode)

@@ -111,6 +111,50 @@ func TestSubscriptionProcedureStreamsValues(t *testing.T) {
 	}
 }
 
+func TestSubscriptionProcedureClosesNilStream(t *testing.T) {
+	procedure := Subscription[procedureInput, procedureOutput](func(ctx context.Context, input procedureInput) (<-chan procedureOutput, error) {
+		return nil, nil
+	})
+
+	stream, err := procedure.Call(context.Background(), procedure.Fn, procedureInput{})
+	if err != nil {
+		t.Fatalf("call subscription: %v", err)
+	}
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("stream is open, want closed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for nil subscription stream to close")
+	}
+}
+
+func TestSubscriptionProcedureStopsWaitingOnContextCancel(t *testing.T) {
+	quiet := make(chan procedureOutput)
+	procedure := Subscription[procedureInput, procedureOutput](func(ctx context.Context, input procedureInput) (<-chan procedureOutput, error) {
+		return quiet, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := procedure.Call(ctx, procedure.Fn, procedureInput{})
+	if err != nil {
+		t.Fatalf("call subscription: %v", err)
+	}
+
+	cancel()
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("stream is open, want closed after context cancel")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for canceled subscription stream to close")
+	}
+}
+
 func TestSubscriptionProcedureRejectsInvalidFunction(t *testing.T) {
 	procedure := Subscription[procedureInput, procedureOutput](func(ctx context.Context, input procedureInput) (<-chan procedureOutput, error) {
 		return nil, nil
