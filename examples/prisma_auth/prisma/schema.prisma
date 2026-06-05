@@ -1,0 +1,25 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.db"
+}
+
+generator db {
+  provider          = "go run github.com/steebchen/prisma-client-go"
+  output            = "../db"
+  disableGoBinaries = true
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String
+  passwordHash String
+  tokens       AuthToken[]
+}
+
+model AuthToken {
+  id     String @id @default(cuid())
+  token  String @unique
+  userID String @unique
+  user   User   @relation(fields: [userID], references: [id], onDelete: Cascade)
+}

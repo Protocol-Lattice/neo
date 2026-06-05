@@ -1029,6 +1029,11 @@ router.Register("me", neo.Query(func(ctx context.Context, in struct{}) (User, er
 }))
 ```
 
+See `examples/prisma_auth` for a runnable example that resolves an
+`Authorization: Bearer ...` token to a user ID, stores that user ID on
+`context.Context`, and uses a `neo-gen` typed client against a password-hash
+Prisma auth flow with `auth.login`, `auth.register`, and protected `user.me`.
+
 ---
 
 ## Rate Limit Middleware Example
