@@ -23,8 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         go-version:
-          - '1.25.11'
-          - '1.26.4'
+          - '1.22.x'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,10 +70,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup patched Go
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.22.x'
           cache: true
 
       - name: Install govulncheck
@@ -93,7 +92,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.4'
+          go-version: '1.22.x'
           cache: true
 
       - name: Run benchmark smoke tests
