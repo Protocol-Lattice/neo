@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -87,7 +88,7 @@ func (opts ServerOptions) withDefaults() ServerOptions {
 	if opts.IdleTimeout == 0 {
 		opts.IdleTimeout = 60 * time.Second
 	}
-	if opts.MaxRequestBody == 0 {
+	if opts.MaxRequestBody <= 0 {
 		opts.MaxRequestBody = DefaultMaxRequestBody
 	}
 	return opts
@@ -135,6 +136,9 @@ func (router *Router) Metadata() []ProcedureMeta {
 	for _, meta := range router.metadata {
 		metas = append(metas, meta)
 	}
+	sort.Slice(metas, func(i, j int) bool {
+		return metas[i].Key < metas[j].Key
+	})
 
 	return metas
 }

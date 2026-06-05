@@ -110,3 +110,19 @@ func TestEventBusWithOptionsControlsSubscriberBuffer(t *testing.T) {
 	default:
 	}
 }
+
+func TestEventBusSubscribeClosedWhenContextAlreadyCanceled(t *testing.T) {
+	bus := NewEventBus()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	sub := bus.Subscribe(ctx, "topic")
+	select {
+	case _, ok := <-sub:
+		if ok {
+			t.Fatal("subscription channel is open, want closed")
+		}
+	default:
+		t.Fatal("subscription channel is not closed")
+	}
+}

@@ -74,6 +74,63 @@ func TestBrokerSubscribeClosesOnConnectionFailure(t *testing.T) {
 	}
 }
 
+func TestBrokerRejectsInvalidSubjects(t *testing.T) {
+	logger := &recordingLogger{}
+	broker := New(Options{Logger: logger})
+
+	stream := broker.Subscribe(context.Background(), "feed\r\nPING")
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("subscription channel is open, want closed")
+		}
+	default:
+		t.Fatal("subscription channel is not closed")
+	}
+
+	broker.Publish("feed\r\nPING", neo.Event{Topic: "feed", Name: "bad"})
+	if !logger.contains("invalid subject") {
+		t.Fatalf("logs = %#v, want invalid subject", logger.messages)
+	}
+}
+
+func TestReadMSGRejectsOversizedPayloadBeforeAllocation(t *testing.T) {
+	rw := bufio.NewReadWriter(
+		bufio.NewReader(strings.NewReader("")),
+		bufio.NewWriter(io.Discard),
+	)
+
+	_, err := readMSG(rw, "MSG feed 1 5", 4)
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("error = %v, want exceeds limit", err)
+	}
+}
+
+func TestReadNATSProtocolLineRejectsOverLimit(t *testing.T) {
+	reader := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", 32)+"\r\n"), 8)
+	_, err := readNATSProtocolLine(reader, 16)
+	if err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("error = %v, want protocol line too long", err)
+	}
+}
+
+type recordingLogger struct {
+	messages []string
+}
+
+func (logger *recordingLogger) Printf(format string, args ...any) {
+	logger.messages = append(logger.messages, fmt.Sprintf(format, args...))
+}
+
+func (logger *recordingLogger) contains(needle string) bool {
+	for _, message := range logger.messages {
+		if strings.Contains(message, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 type fakeNATSServer struct {
 	ln          net.Listener
 	addr        string

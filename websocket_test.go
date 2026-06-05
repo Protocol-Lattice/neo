@@ -2,6 +2,7 @@ package neo
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -97,6 +98,26 @@ func TestReadWebSocketUpgradeResponseRejectsMalformedHeaders(t *testing.T) {
 				t.Fatal("expected error, got nil")
 			}
 		})
+	}
+}
+
+func TestReadLimitedHTTPLineRejectsOverLimitBeforeNewline(t *testing.T) {
+	reader := bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", 32)+"\r\n"), 8)
+	_, _, err := readLimitedHTTPLine(reader, 16)
+	if err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("error = %v, want line too long", err)
+	}
+}
+
+func TestReadWebSocketFrameRejectsUnexpectedMaskedServerFrame(t *testing.T) {
+	frame := []byte{
+		0x80 | webSocketOpcodeText,
+		0x80,
+		0x00, 0x00, 0x00, 0x00,
+	}
+	_, _, err := readWebSocketFrame(bufio.NewReader(bytes.NewReader(frame)), false)
+	if err == nil || !strings.Contains(err.Error(), "unexpected masked") {
+		t.Fatalf("error = %v, want unexpected masked frame", err)
 	}
 }
 

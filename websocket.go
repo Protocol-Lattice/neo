@@ -295,17 +295,24 @@ func readWebSocketUpgradeResponse(reader *bufio.Reader) (webSocketUpgradeRespons
 }
 
 func readLimitedHTTPLine(reader *bufio.Reader, limit int) (string, int, error) {
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return "", len(line), err
+	var line []byte
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		line = append(line, fragment...)
+		if len(line) > limit {
+			return "", len(line), errors.New("HTTP line too long")
+		}
+		if err == nil {
+			break
+		}
+		if err != bufio.ErrBufferFull {
+			return "", len(line), err
+		}
 	}
-	if len(line) > limit {
-		return "", len(line), errors.New("HTTP line too long")
-	}
-	if !strings.HasSuffix(line, "\r\n") {
+	if !bytes.HasSuffix(line, []byte("\r\n")) {
 		return "", len(line), errors.New("HTTP line missing CRLF terminator")
 	}
-	return strings.TrimSuffix(line, "\r\n"), len(line), nil
+	return string(bytes.TrimSuffix(line, []byte("\r\n"))), len(line), nil
 }
 
 func parseHTTPStatusCode(value string) (int, error) {
@@ -493,6 +500,9 @@ func readWebSocketFrame(r *bufio.Reader, expectMasked bool) ([]byte, byte, error
 	masked := second&0x80 != 0
 	if expectMasked && !masked {
 		return nil, 0, errors.New("expected masked websocket frame")
+	}
+	if !expectMasked && masked {
+		return nil, 0, errors.New("unexpected masked websocket frame")
 	}
 
 	length := uint64(second & 0x7f)

@@ -91,7 +91,7 @@ func (bus *EventBus) Subscribe(ctx context.Context, topic string) <-chan any {
 		buffer = bus.subscriberBuffer
 	}
 	out := make(chan any, buffer)
-	if bus == nil {
+	if bus == nil || ctx == nil || ctx.Err() != nil {
 		close(out)
 		return out
 	}
