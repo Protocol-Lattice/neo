@@ -62,6 +62,35 @@ func TestWebSocketSubscriptionMissingProcedureReturnsError(t *testing.T) {
 	}
 }
 
+func TestWebSocketSubscriptionClosesOnContextCancel(t *testing.T) {
+	router := NewRouter()
+	router.RegisterSubscription("events", Subscription[struct{}, testOutput](func(ctx context.Context, in struct{}) (<-chan testOutput, error) {
+		return make(chan testOutput), nil
+	}))
+
+	server := newTestServer(router)
+	defer server.Close()
+
+	client := NewClient(server.URL + "/neo")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	stream, err := client.Subscription.Procedure("events").SubscribeWebSocket(ctx, nil)
+	if err != nil {
+		t.Fatalf("subscribe websocket: %v", err)
+	}
+
+	cancel()
+
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("stream is open, want closed after context cancel")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for websocket stream to close")
+	}
+}
+
 func TestReadWebSocketUpgradeResponseParsesHeadersWithoutHTTPReadResponse(t *testing.T) {
 	reader := bufio.NewReader(strings.NewReader("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: abc\r\n\r\n"))
 

@@ -1,11 +1,12 @@
 package neo
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -136,8 +137,8 @@ func (router *Router) Metadata() []ProcedureMeta {
 	for _, meta := range router.metadata {
 		metas = append(metas, meta)
 	}
-	sort.Slice(metas, func(i, j int) bool {
-		return metas[i].Key < metas[j].Key
+	slices.SortFunc(metas, func(a, b ProcedureMeta) int {
+		return cmp.Compare(a.Key, b.Key)
 	})
 
 	return metas

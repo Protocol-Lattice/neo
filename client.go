@@ -130,24 +130,42 @@ func SubscribeTyped[In, Out any](ctx context.Context, procedure *ClientProcedure
 		return nil, err
 	}
 
+	return decodeClientStream[Out](ctx, raw), nil
+}
+
+func decodeClientStream[Out any](ctx context.Context, raw <-chan any) <-chan Out {
+	ctx = ensureContext(ctx)
+
 	out := make(chan Out)
+	if raw == nil {
+		close(out)
+		return out
+	}
+
 	go func() {
 		defer close(out)
-		for value := range raw {
-			decoded, err := decodeClientValue[Out](value)
-			if err != nil {
-				return
-			}
-
+		for {
 			select {
 			case <-ctx.Done():
 				return
-			case out <- decoded:
+			case value, ok := <-raw:
+				if !ok {
+					return
+				}
+				decoded, err := decodeClientValue[Out](value)
+				if err != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case out <- decoded:
+				}
 			}
 		}
 	}()
 
-	return out, nil
+	return out
 }
 
 func decodeClientValue[T any](value any) (T, error) {
@@ -178,7 +196,9 @@ func (client *Client) call(ctx context.Context, method string, key string, input
 	if err != nil {
 		return nil, fmt.Errorf("call procedure %q: %w", key, err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 
 	var rpcRes Response
 	if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
@@ -214,7 +234,9 @@ func (client *Client) subscribe(ctx context.Context, key string, input any) (<-c
 	}
 
 	if res.StatusCode >= 400 {
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 
 		var rpcRes Response
 		if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
@@ -230,7 +252,9 @@ func (client *Client) subscribe(ctx context.Context, key string, input any) (<-c
 	out := make(chan any)
 
 	go func() {
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 		defer close(out)
 
 		// bufio.Reader.ReadBytes grows to fit any line length, unlike
@@ -267,6 +291,7 @@ func (client *Client) subscribe(ctx context.Context, key string, input any) (<-c
 }
 
 func (client *Client) newRequest(ctx context.Context, method string, key string, input any) (*http.Request, error) {
+	ctx = ensureContext(ctx)
 	endpoint := fmt.Sprintf("%s/%s", client.addr, strings.Trim(key, "/"))
 
 	var body *bytes.Reader

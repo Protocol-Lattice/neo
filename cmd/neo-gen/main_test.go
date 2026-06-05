@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"os"
@@ -77,6 +78,74 @@ func broken( {`)
 	})
 }
 
+func TestRunNeoGenWritesGeneratedFileAndStatus(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.go", `package example
+
+type Input struct{ Name string }
+type Output struct{ Message string }
+
+func register(root Router) {
+	root.Register("hello", neo.Query[Input, Output]())
+}
+`)
+
+	out := filepath.Join(t.TempDir(), "nested", "neo.gen.go")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := runNeoGen([]string{"-dir", dir, "-out", out}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runNeoGen returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read generated file: %v", err)
+	}
+	text := string(raw)
+	assertContains(t, text, "package example")
+	assertContains(t, text, "type TypedClient struct {")
+	assertContains(t, text, "func (p HelloProcedure) Query(ctx context.Context, input Input) (Output, error)")
+	assertContains(t, stdout.String(), "neo-gen: generated 1 typed procedures in "+out)
+}
+
+func TestRunNeoGenReturnsCommandErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.go", `package example
+func register(root Router) {}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := runNeoGen([]string{"-dir", dir, "-target", "bogus"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "no typed procedures found") {
+		t.Fatalf("error = %v, want no typed procedures found", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestGenerateTargetRejectsUnsupportedTarget(t *testing.T) {
+	_, err := generateTarget(packageScan{
+		Package: "example",
+		Procedures: []procedure{
+			{Key: "hello", Kind: "query", Input: "struct{}", Output: "string"},
+		},
+	}, "example", commandConfig{
+		dir:    ".",
+		target: "bogus",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("error = %v, want unsupported target", err)
+	}
+}
+
 func TestRegisterCall(t *testing.T) {
 	expr := parseCall(t, `router.Register("user.get-by_id", neo.Query[GetUserInput, *User]())`)
 	receiver, key, kind, input, output, ok := registerCall(expr)
@@ -142,7 +211,10 @@ func TestInferPrefixesNestedChain(t *testing.T) {
 		{Parent: "admin", Prefix: "user", Child: "user"},
 	}
 
-	got := inferPrefixes(receivers, nested)
+	got, err := inferPrefixes(receivers, nested)
+	if err != nil {
+		t.Fatalf("inferPrefixes returned error: %v", err)
+	}
 	want := map[string]string{
 		"root":  "",
 		"admin": "api",
@@ -150,6 +222,50 @@ func TestInferPrefixesNestedChain(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("prefixes = %#v, want %#v", got, want)
+	}
+}
+
+func TestInferPrefixesRejectsInvalidNestedGraphs(t *testing.T) {
+	tests := []struct {
+		name      string
+		receivers map[string]struct{}
+		nested    []nestedRouter
+		want      string
+	}{
+		{
+			name: "cycle",
+			receivers: map[string]struct{}{
+				"root": {},
+				"user": {},
+			},
+			nested: []nestedRouter{
+				{Parent: "root", Prefix: "user", Child: "user"},
+				{Parent: "user", Prefix: "root", Child: "root"},
+			},
+			want: "cycle",
+		},
+		{
+			name: "conflicting prefixes",
+			receivers: map[string]struct{}{
+				"root":  {},
+				"admin": {},
+				"user":  {},
+			},
+			nested: []nestedRouter{
+				{Parent: "root", Prefix: "public", Child: "user"},
+				{Parent: "admin", Prefix: "private", Child: "user"},
+			},
+			want: "conflicting prefixes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := inferPrefixes(tt.receivers, tt.nested)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

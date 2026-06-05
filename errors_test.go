@@ -63,7 +63,9 @@ func TestProcedureTypedErrorMapsToStatusAndCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 	if res.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", res.StatusCode)
 	}
@@ -135,7 +137,9 @@ func TestMethodEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET mutation: %v", err)
 	}
-	res.Body.Close()
+	if err := res.Body.Close(); err != nil {
+		t.Fatalf("close response body: %v", err)
+	}
 
 	if res.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("mutation-over-GET status = %d, want 405", res.StatusCode)
@@ -150,7 +154,9 @@ func TestMethodEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST query: %v", err)
 	}
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("query-over-POST status = %d, want 200", res.StatusCode)

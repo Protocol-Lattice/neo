@@ -54,6 +54,8 @@ func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error))
 			Output: typeName[Out](),
 		},
 		Call: func(ctx context.Context, rawFn any, input any) (<-chan any, error) {
+			ctx = ensureContext(ctx)
+
 			call, ok := rawFn.(func(context.Context, In) (<-chan Out, error))
 			if !ok {
 				return nil, fmt.Errorf("invalid subscription function")
@@ -70,13 +72,26 @@ func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error))
 			}
 
 			out := make(chan any)
+			if stream == nil {
+				close(out)
+				return out, nil
+			}
+
 			go func() {
 				defer close(out)
-				for value := range stream {
+				for {
 					select {
 					case <-ctx.Done():
 						return
-					case out <- value:
+					case value, ok := <-stream:
+						if !ok {
+							return
+						}
+						select {
+						case <-ctx.Done():
+							return
+						case out <- value:
+						}
 					}
 				}
 			}()
@@ -96,6 +111,8 @@ func typedProcedure[In, Out any](kind ProcedureKind, fn func(context.Context, In
 			Output: typeName[Out](),
 		},
 		Call: func(ctx context.Context, rawFn any, input any) (any, error) {
+			ctx = ensureContext(ctx)
+
 			call, ok := rawFn.(func(context.Context, In) (Out, error))
 			if !ok {
 				return nil, fmt.Errorf("invalid procedure function")
