@@ -90,6 +90,19 @@ func TestRegisterCall(t *testing.T) {
 	assertEqual(t, output, "*User")
 }
 
+func TestStringLiteralUnquotesEscapes(t *testing.T) {
+	expr, err := parser.ParseExpr(`"user.\u0067et"`)
+	if err != nil {
+		t.Fatalf("parse expr: %v", err)
+	}
+
+	got, ok := stringLiteral(expr)
+	if !ok {
+		t.Fatal("stringLiteral ok = false, want true")
+	}
+	assertEqual(t, got, "user.get")
+}
+
 func TestRegisterCallRejectsUnsupportedShapes(t *testing.T) {
 	tests := []string{
 		`router.Handle("x", neo.Query[In, Out]())`,

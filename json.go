@@ -3,6 +3,7 @@ package neo
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 )
 
@@ -38,7 +39,7 @@ func readInput(r *http.Request) (any, error) {
 		defer r.Body.Close()
 
 		var req Request
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeSingleJSON(r.Body, &req); err != nil {
 			return nil, errors.New("invalid JSON body")
 		}
 
@@ -47,4 +48,21 @@ func readInput(r *http.Request) (any, error) {
 	default:
 		return nil, errors.New("method not allowed")
 	}
+}
+
+func decodeSingleJSON(r io.Reader, value any) error {
+	decoder := json.NewDecoder(r)
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+
+	return nil
 }

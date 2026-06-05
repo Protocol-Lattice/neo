@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/Protocol-Lattice/neo"
 )
@@ -25,6 +27,9 @@ const (
 	DefaultDialTimeout      = 5 * time.Second
 	DefaultHandshakeTimeout = 5 * time.Second
 	DefaultSubscriberBuffer = 16
+	DefaultMaxMessageBytes  = 64 << 20
+
+	maxProtocolLineBytes = 8 << 10
 )
 
 // Logger is the small logging surface used by Broker.
@@ -50,6 +55,10 @@ type Options struct {
 	// subscriber. Values <= 0 use DefaultSubscriberBuffer.
 	SubscriberBuffer int
 
+	// MaxMessageBytes bounds a single NATS MSG payload before allocation. Values
+	// <= 0 use DefaultMaxMessageBytes.
+	MaxMessageBytes int
+
 	// Logger receives connection, publish, and subscription errors. Nil disables
 	// adapter logging.
 	Logger Logger
@@ -65,6 +74,7 @@ type Broker struct {
 	dialTimeout      time.Duration
 	handshakeTimeout time.Duration
 	subscriberBuffer int
+	maxMessageBytes  int
 	logger           Logger
 	nextSID          atomic.Uint64
 }
@@ -89,19 +99,28 @@ func New(opts Options) *Broker {
 	if subscriberBuffer <= 0 {
 		subscriberBuffer = DefaultSubscriberBuffer
 	}
+	maxMessageBytes := opts.MaxMessageBytes
+	if maxMessageBytes <= 0 {
+		maxMessageBytes = DefaultMaxMessageBytes
+	}
 
 	return &Broker{
 		addr:             addr,
 		dialTimeout:      dialTimeout,
 		handshakeTimeout: handshakeTimeout,
 		subscriberBuffer: subscriberBuffer,
+		maxMessageBytes:  maxMessageBytes,
 		logger:           opts.Logger,
 	}
 }
 
 // Publish serializes event as JSON and publishes it to topic.
 func (broker *Broker) Publish(topic string, event any) {
-	if broker == nil || strings.TrimSpace(topic) == "" {
+	if broker == nil {
+		return
+	}
+	if !isValidSubject(topic) {
+		broker.logf("nats publish invalid subject %q", topic)
 		return
 	}
 
@@ -146,7 +165,17 @@ func (broker *Broker) Subscribe(ctx context.Context, topic string) <-chan any {
 	}
 	out := make(chan any, buffer)
 
-	if broker == nil || strings.TrimSpace(topic) == "" {
+	if broker == nil {
+		close(out)
+		return out
+	}
+	if ctx == nil {
+		broker.logf("nats subscribe %q: nil context", topic)
+		close(out)
+		return out
+	}
+	if !isValidSubject(topic) {
+		broker.logf("nats subscribe invalid subject %q", topic)
 		close(out)
 		return out
 	}
@@ -186,7 +215,7 @@ func (broker *Broker) subscribe(ctx context.Context, topic string, out chan any)
 	defer close(done)
 
 	for {
-		line, err := rw.ReadString('\n')
+		line, err := readNATSProtocolLine(rw.Reader, maxProtocolLineBytes)
 		if err != nil {
 			if ctx.Err() == nil && err != io.EOF {
 				broker.logf("nats subscribe read %q: %v", topic, err)
@@ -194,7 +223,6 @@ func (broker *Broker) subscribe(ctx context.Context, topic string, out chan any)
 			return
 		}
 
-		line = strings.TrimRight(line, "\r\n")
 		switch {
 		case line == "" || line == "+OK" || strings.HasPrefix(line, "INFO "):
 			continue
@@ -211,7 +239,7 @@ func (broker *Broker) subscribe(ctx context.Context, topic string, out chan any)
 				return
 			}
 		case strings.HasPrefix(line, "MSG "):
-			msg, err := readMSG(rw, line)
+			msg, err := readMSG(rw, line, broker.maxMessageBytes)
 			if err != nil {
 				broker.logf("nats subscribe msg %q: %v", topic, err)
 				return
@@ -251,7 +279,7 @@ func (broker *Broker) connect(ctx context.Context) (net.Conn, *bufio.ReadWriter,
 	}
 
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-	line, err := rw.ReadString('\n')
+	line, err := readNATSProtocolLine(rw.Reader, maxProtocolLineBytes)
 	if err != nil {
 		_ = conn.Close()
 		return nil, nil, fmt.Errorf("read INFO: %w", err)
@@ -274,7 +302,7 @@ func (broker *Broker) connect(ctx context.Context) (net.Conn, *bufio.ReadWriter,
 	return conn, rw, nil
 }
 
-func readMSG(rw *bufio.ReadWriter, header string) ([]byte, error) {
+func readMSG(rw *bufio.ReadWriter, header string, maxBytes int) ([]byte, error) {
 	fields := strings.Fields(header)
 	if len(fields) != 4 && len(fields) != 5 {
 		return nil, fmt.Errorf("invalid MSG header %q", header)
@@ -285,21 +313,66 @@ func readMSG(rw *bufio.ReadWriter, header string) ([]byte, error) {
 	if err != nil || n < 0 {
 		return nil, fmt.Errorf("invalid MSG size %q", bytesField)
 	}
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxMessageBytes
+	}
+	if n > maxBytes {
+		return nil, fmt.Errorf("MSG size %d exceeds limit %d", n, maxBytes)
+	}
 
 	payload := make([]byte, n)
 	if _, err := io.ReadFull(rw, payload); err != nil {
 		return nil, err
 	}
 
-	terminator := make([]byte, 2)
-	if _, err := io.ReadFull(rw, terminator); err != nil {
+	var terminator [2]byte
+	if _, err := io.ReadFull(rw, terminator[:]); err != nil {
 		return nil, err
 	}
-	if string(terminator) != "\r\n" {
-		return nil, fmt.Errorf("invalid MSG terminator %q", string(terminator))
+	if string(terminator[:]) != "\r\n" {
+		return nil, fmt.Errorf("invalid MSG terminator %q", string(terminator[:]))
 	}
 
 	return payload, nil
+}
+
+func readNATSProtocolLine(reader *bufio.Reader, limit int) (string, error) {
+	if limit <= 0 {
+		limit = maxProtocolLineBytes
+	}
+
+	var line []byte
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		line = append(line, fragment...)
+		if len(line) > limit {
+			return "", errors.New("nats protocol line too long")
+		}
+		if err == nil {
+			break
+		}
+		if err != bufio.ErrBufferFull {
+			return "", err
+		}
+	}
+
+	raw := string(line)
+	if !strings.HasSuffix(raw, "\r\n") {
+		return "", errors.New("nats protocol line missing CRLF terminator")
+	}
+	return strings.TrimSuffix(raw, "\r\n"), nil
+}
+
+func isValidSubject(subject string) bool {
+	if subject == "" {
+		return false
+	}
+	for _, r := range subject {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (broker *Broker) logf(format string, args ...any) {

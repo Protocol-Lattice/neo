@@ -26,27 +26,35 @@ const (
 	CodeTimeout          ErrorCode = "TIMEOUT"
 )
 
-var codeToStatus = map[ErrorCode]int{
-	CodeBadRequest:       http.StatusBadRequest,
-	CodeUnauthorized:     http.StatusUnauthorized,
-	CodeForbidden:        http.StatusForbidden,
-	CodeNotFound:         http.StatusNotFound,
-	CodeMethodNotAllowed: http.StatusMethodNotAllowed,
-	CodeConflict:         http.StatusConflict,
-	CodeTooManyRequests:  http.StatusTooManyRequests,
-	CodeInternal:         http.StatusInternalServerError,
-	CodeNotImplemented:   http.StatusNotImplemented,
-	CodeUnavailable:      http.StatusServiceUnavailable,
-	CodeTimeout:          http.StatusGatewayTimeout,
-}
-
 // HTTPStatus returns the HTTP status the code maps to, defaulting to 500 for
 // unknown or empty codes.
 func (c ErrorCode) HTTPStatus() int {
-	if status, ok := codeToStatus[c]; ok {
-		return status
+	switch c {
+	case CodeBadRequest:
+		return http.StatusBadRequest
+	case CodeUnauthorized:
+		return http.StatusUnauthorized
+	case CodeForbidden:
+		return http.StatusForbidden
+	case CodeNotFound:
+		return http.StatusNotFound
+	case CodeMethodNotAllowed:
+		return http.StatusMethodNotAllowed
+	case CodeConflict:
+		return http.StatusConflict
+	case CodeTooManyRequests:
+		return http.StatusTooManyRequests
+	case CodeInternal:
+		return http.StatusInternalServerError
+	case CodeNotImplemented:
+		return http.StatusNotImplemented
+	case CodeUnavailable:
+		return http.StatusServiceUnavailable
+	case CodeTimeout:
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusInternalServerError
 	}
-	return http.StatusInternalServerError
 }
 
 // Error is the structured error procedures return to control the response

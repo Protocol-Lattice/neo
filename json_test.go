@@ -104,6 +104,14 @@ func TestReadInputPOSTRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestReadInputPOSTRejectsTrailingJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/neo/user.create", strings.NewReader(`{"input":{"name":"Kamil"}} {}`))
+	_, err := readInput(req)
+	if err == nil || err.Error() != "invalid JSON body" {
+		t.Fatalf("error = %v, want invalid JSON body", err)
+	}
+}
+
 func TestReadInputRejectsUnsupportedMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/neo/user.create", nil)
 	_, err := readInput(req)

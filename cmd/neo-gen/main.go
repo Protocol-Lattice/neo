@@ -393,7 +393,11 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 	if !ok || lit.Kind != token.STRING {
 		return "", false
 	}
-	return strings.Trim(lit.Value, "`\""), true
+	value, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	return value, true
 }
 
 func exprString(expr ast.Expr) string {

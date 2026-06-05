@@ -159,6 +159,35 @@ func TestMergeCopiesProceduresSubscriptionsMetadataAndMiddleware(t *testing.T) {
 	}
 }
 
+func TestMetadataReturnsStableKeyOrder(t *testing.T) {
+	router := NewRouter()
+	router.Register("zeta", Query(func(context.Context, struct{}) (string, error) { return "", nil }))
+	router.Register("alpha", Query(func(context.Context, struct{}) (string, error) { return "", nil }))
+	router.RegisterSubscription("events", Subscription(func(context.Context, struct{}) (<-chan string, error) {
+		ch := make(chan string)
+		close(ch)
+		return ch, nil
+	}))
+
+	metas := router.Metadata()
+	got := make([]string, 0, len(metas))
+	for _, meta := range metas {
+		got = append(got, meta.Key)
+	}
+
+	want := []string{"alpha", "events", "zeta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("metadata keys = %#v, want %#v", got, want)
+	}
+}
+
+func TestServerOptionsDefaultsNonPositiveMaxRequestBody(t *testing.T) {
+	opts := (ServerOptions{MaxRequestBody: -1}).withDefaults()
+	if opts.MaxRequestBody != DefaultMaxRequestBody {
+		t.Fatalf("MaxRequestBody = %d, want %d", opts.MaxRequestBody, DefaultMaxRequestBody)
+	}
+}
+
 func TestUseCORSRestrictsOriginsAndCredentials(t *testing.T) {
 	router := NewRouter()
 	router.UseCORS(CORSOptions{
