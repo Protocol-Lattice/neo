@@ -1,5 +1,4 @@
-# Neo
-
+<img width="1024" height="1024" alt="ChatGPT Image 5 cze 2026 o 14_14_48" src="https://github.com/user-attachments/assets/8f0fce3d-d34b-4771-afc1-7d0ea4c5d533" />
 > A lightweight, type-friendly, tRPC-style RPC framework for Go.
 
 Neo gives Go backends a clean procedure-based API with **queries**, **mutations**, **subscriptions**, middleware, nested routers, generated metadata, and a small client API.
