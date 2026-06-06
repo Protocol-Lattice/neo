@@ -1,4 +1,4 @@
-package neo
+package benchmarks_test
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"testing"
 
+	neo "github.com/Protocol-Lattice/neo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/interop/grpc_testing"
@@ -38,36 +39,38 @@ func (benchGRPCServer) UnaryCall(context.Context, *grpc_testing.SimpleRequest) (
 	}, nil
 }
 
-func newBenchmarkNeoRouter(kind ProcedureKind) *Router {
-	router := NewRouter()
+func newBenchmarkNeoRouter(kind neo.ProcedureKind) *neo.Router {
+	router := neo.NewRouter()
 	fn := func(ctx context.Context, input benchInput) (benchOutput, error) {
 		return benchOutput{Sum: input.A + input.B}, nil
 	}
 
-	if kind == ProcedureKindMutation {
-		router.Register("sum", Mutation[benchInput, benchOutput](fn))
+	if kind == neo.ProcedureKindMutation {
+		router.Register("sum", neo.Mutation[benchInput, benchOutput](fn))
 	} else {
-		router.Register("sum", Query[benchInput, benchOutput](fn))
+		router.Register("sum", neo.Query[benchInput, benchOutput](fn))
 	}
 
 	return router
 }
 
-func newBenchmarkNeoClient(b *testing.B, kind ProcedureKind) *ClientProcedure {
+func newBenchmarkNeoClient(b *testing.B, kind neo.ProcedureKind) *neo.ClientProcedure {
 	b.Helper()
 
 	router := newBenchmarkNeoRouter(kind)
-	server := newTestServer(router)
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+	server := httptest.NewServer(mux)
 	b.Cleanup(server.Close)
 
-	client := NewClient(server.URL + "/neo")
-	if kind == ProcedureKindMutation {
+	client := neo.NewClient(server.URL + "/neo")
+	if kind == neo.ProcedureKindMutation {
 		return client.Mutation.Procedure("sum")
 	}
 	return client.Query.Procedure("sum")
 }
 
-func newBenchmarkNeoBufConnClient(b *testing.B, kind ProcedureKind) (*ClientProcedure, func()) {
+func newBenchmarkNeoBufConnClient(b *testing.B, kind neo.ProcedureKind) (*neo.ClientProcedure, func()) {
 	b.Helper()
 
 	listener := bufconn.Listen(1 << 20)
@@ -98,8 +101,8 @@ func newBenchmarkNeoBufConnClient(b *testing.B, kind ProcedureKind) (*ClientProc
 		}
 	}
 
-	client := NewClient("http://bufconn/neo", WithHTTPClient(&http.Client{Transport: transport}))
-	if kind == ProcedureKindMutation {
+	client := neo.NewClient("http://bufconn/neo", neo.WithHTTPClient(&http.Client{Transport: transport}))
+	if kind == neo.ProcedureKindMutation {
 		return client.Mutation.Procedure("sum"), cleanup
 	}
 	return client.Query.Procedure("sum"), cleanup
@@ -199,7 +202,7 @@ func newBenchmarkGRPCTCPClient(b *testing.B) (grpc_testing.BenchmarkServiceClien
 }
 
 func BenchmarkNeoQueryHTTPServer(b *testing.B) {
-	procedure := newBenchmarkNeoClient(b, ProcedureKindQuery)
+	procedure := newBenchmarkNeoClient(b, neo.ProcedureKindQuery)
 	ctx := context.Background()
 	input := benchInput{A: 40, B: 2}
 
@@ -207,7 +210,7 @@ func BenchmarkNeoQueryHTTPServer(b *testing.B) {
 	b.ResetTimer()
 
 	for range b.N {
-		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
+		got, err := neo.CallTyped[benchInput, benchOutput](ctx, procedure, input)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -218,7 +221,7 @@ func BenchmarkNeoQueryHTTPServer(b *testing.B) {
 }
 
 func BenchmarkNeoQueryBufConn(b *testing.B) {
-	procedure, cleanup := newBenchmarkNeoBufConnClient(b, ProcedureKindQuery)
+	procedure, cleanup := newBenchmarkNeoBufConnClient(b, neo.ProcedureKindQuery)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -228,7 +231,7 @@ func BenchmarkNeoQueryBufConn(b *testing.B) {
 	b.ResetTimer()
 
 	for range b.N {
-		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
+		got, err := neo.CallTyped[benchInput, benchOutput](ctx, procedure, input)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -283,7 +286,7 @@ func BenchmarkPlainQueryHTTPServer(b *testing.B) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(Response{Result: benchOutput{Sum: input.A + input.B}})
+		_ = json.NewEncoder(w).Encode(neo.Response{Result: benchOutput{Sum: input.A + input.B}})
 	}))
 	b.Cleanup(server.Close)
 
@@ -309,7 +312,7 @@ func BenchmarkPlainQueryHTTPServer(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		var rpcRes Response
+		var rpcRes neo.Response
 		if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
 			if closeErr := res.Body.Close(); closeErr != nil {
 				b.Fatalf("close response body: %v", closeErr)
@@ -327,7 +330,7 @@ func BenchmarkPlainQueryHTTPServer(b *testing.B) {
 }
 
 func BenchmarkNeoMutationHTTPServer(b *testing.B) {
-	procedure := newBenchmarkNeoClient(b, ProcedureKindMutation)
+	procedure := newBenchmarkNeoClient(b, neo.ProcedureKindMutation)
 	ctx := context.Background()
 	input := benchInput{A: 40, B: 2}
 
@@ -335,7 +338,7 @@ func BenchmarkNeoMutationHTTPServer(b *testing.B) {
 	b.ResetTimer()
 
 	for range b.N {
-		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
+		got, err := neo.CallTyped[benchInput, benchOutput](ctx, procedure, input)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -346,7 +349,7 @@ func BenchmarkNeoMutationHTTPServer(b *testing.B) {
 }
 
 func BenchmarkNeoMutationBufConn(b *testing.B) {
-	procedure, cleanup := newBenchmarkNeoBufConnClient(b, ProcedureKindMutation)
+	procedure, cleanup := newBenchmarkNeoBufConnClient(b, neo.ProcedureKindMutation)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -356,7 +359,7 @@ func BenchmarkNeoMutationBufConn(b *testing.B) {
 	b.ResetTimer()
 
 	for range b.N {
-		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
+		got, err := neo.CallTyped[benchInput, benchOutput](ctx, procedure, input)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -368,7 +371,7 @@ func BenchmarkNeoMutationBufConn(b *testing.B) {
 
 func BenchmarkPlainMutationHTTPServer(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req Request
+		var req neo.Request
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -387,12 +390,12 @@ func BenchmarkPlainMutationHTTPServer(b *testing.B) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(Response{Result: benchOutput{Sum: input.A + input.B}})
+		_ = json.NewEncoder(w).Encode(neo.Response{Result: benchOutput{Sum: input.A + input.B}})
 	}))
 	b.Cleanup(server.Close)
 
 	client := http.DefaultClient
-	input := Request{Input: benchInput{A: 40, B: 2}}
+	input := neo.Request{Input: benchInput{A: 40, B: 2}}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -414,7 +417,7 @@ func BenchmarkPlainMutationHTTPServer(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		var rpcRes Response
+		var rpcRes neo.Response
 		if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
 			if closeErr := res.Body.Close(); closeErr != nil {
 				b.Fatalf("close response body: %v", closeErr)
