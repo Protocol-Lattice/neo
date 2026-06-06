@@ -24,6 +24,7 @@ Use Neo when you want:
 - Query / mutation / subscription separation.
 - A small RPC layer over HTTP.
 - Nested routers for modular APIs.
+- Gateway composition for local and remote microservices.
 - Middleware around procedure execution.
 - Event-triggered subscriptions.
 - NDJSON subscription streaming.
@@ -40,6 +41,7 @@ Neo is not trying to beat hand-written `net/http` handlers in raw microbenchmark
 Expected top-level files and directories:
 
 - `router.go` — router registration, nesting, merge, HTTP serving, server options.
+- `gateway.go` — microservice gateway for local router mounts and remote service proxies.
 - `procedure.go` — typed Query, Mutation, Subscription procedure definitions.
 - `client.go` — client API, query/mutation/subscription procedure calls.
 - `websocket.go` — WebSocket subscription support.

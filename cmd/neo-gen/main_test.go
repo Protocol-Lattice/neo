@@ -58,6 +58,46 @@ func ignoredGenerated(r Router) { r.Register("ignoredGenerated", neo.Query[int, 
 	}
 }
 
+func TestScanDirFindsGatewayMountedRoutersAndProxyMetadata(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "gateway.go", `package example
+
+type GetUserInput struct{ ID int }
+type User struct{ Name string }
+type CreateOrderInput struct{ UserID int }
+type Order struct{ ID int }
+type OrderEvent struct{ Name string }
+
+func register(gateway Gateway, users Router, ordersURL string) {
+	users.Register("getByID", neo.Query[GetUserInput, User]())
+	gateway.Mount("users", users)
+	gateway.Proxy("orders", ordersURL, neo.WithProxyMetadata(
+		neo.ProcedureMeta{Key: "create", Kind: neo.ProcedureKindMutation, Input: "CreateOrderInput", Output: "Order"},
+		neo.ProcedureMeta{Key: "changes", Kind: neo.ProcedureKindSubscription, Input: "struct{}", Output: "OrderEvent"},
+	))
+}
+`)
+
+	pkg, procedures, err := scanDir(dir)
+	if err != nil {
+		t.Fatalf("scanDir returned error: %v", err)
+	}
+	if pkg != "example" {
+		t.Fatalf("package name = %q, want example", pkg)
+	}
+
+	got := make([]procedure, len(procedures))
+	copy(got, procedures)
+	want := []procedure{
+		{Receiver: "gateway", Key: "orders.changes", Kind: "subscription", Input: "struct{}", Output: "OrderEvent"},
+		{Receiver: "gateway", Key: "orders.create", Kind: "mutation", Input: "CreateOrderInput", Output: "Order"},
+		{Receiver: "users", Key: "users.getByID", Kind: "query", Input: "GetUserInput", Output: "User"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("procedures mismatch\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
 func TestScanDirReturnsHelpfulErrors(t *testing.T) {
 	t.Run("missing package", func(t *testing.T) {
 		dir := t.TempDir()
@@ -198,6 +238,35 @@ func TestNestedCall(t *testing.T) {
 	assertEqual(t, parent, "root")
 	assertEqual(t, prefix, "admin.v1")
 	assertEqual(t, child, "adminRouter")
+}
+
+func TestRouterPrefixCallRecognizesGatewayMount(t *testing.T) {
+	parent, prefix, child, ok := routerPrefixCall(parseCall(t, `gateway.Mount("users", usersRouter)`))
+	if !ok {
+		t.Fatal("routerPrefixCall did not recognize gateway mount")
+	}
+	assertEqual(t, parent, "gateway")
+	assertEqual(t, prefix, "users")
+	assertEqual(t, child, "usersRouter")
+}
+
+func TestGatewayProxyCallFindsProcedureMetadata(t *testing.T) {
+	receiver, procedures, ok := gatewayProxyCall(parseCall(t, `gateway.Proxy("orders", ordersURL, neo.WithProxyMetadata(
+		neo.ProcedureMeta{Key: "create", Kind: neo.ProcedureKindMutation, Input: "CreateOrderInput", Output: "Order"},
+		neo.ProcedureMeta{Key: "list", Kind: "query", Input: "struct{}", Output: "[]Order"},
+	))`))
+	if !ok {
+		t.Fatal("gatewayProxyCall did not recognize proxy metadata")
+	}
+	assertEqual(t, receiver, "gateway")
+
+	want := []procedure{
+		{Receiver: "gateway", Key: "orders.create", Kind: "mutation", Input: "CreateOrderInput", Output: "Order"},
+		{Receiver: "gateway", Key: "orders.list", Kind: "query", Input: "struct{}", Output: "[]Order"},
+	}
+	if !reflect.DeepEqual(procedures, want) {
+		t.Fatalf("procedures = %#v, want %#v", procedures, want)
+	}
 }
 
 func TestInferPrefixesNestedChain(t *testing.T) {
@@ -485,6 +554,22 @@ func TestExamplesTypeScriptClientGeneratedFilesAreCurrent(t *testing.T) {
 		t.Fatalf("generateTypeScript returned error: %v", err)
 	}
 	assertFileContent(t, filepath.Join(exampleDir, "neo.gen.ts"), string(client))
+}
+
+func TestExamplesMicroservicesGatewayClientGeneratedFileIsCurrent(t *testing.T) {
+	gatewayDir := filepath.Clean("../../examples/microservices/gateway")
+	clientDir := filepath.Clean("../../examples/microservices/client")
+
+	scan, err := scanPackage(gatewayDir)
+	if err != nil {
+		t.Fatalf("scanPackage examples/microservices/gateway: %v", err)
+	}
+
+	client, err := generate("main", scan.Procedures)
+	if err != nil {
+		t.Fatalf("generate gateway client returned error: %v", err)
+	}
+	assertFileContent(t, filepath.Join(clientDir, "neo.gen.go"), string(client))
 }
 
 func parseCall(t *testing.T, src string) *ast.CallExpr {

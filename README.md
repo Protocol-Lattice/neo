@@ -26,6 +26,7 @@ router.Register("user.create", neo.Mutation(func(ctx context.Context, in CreateU
 - **tRPC-style client**
 - **Nested routers**
 - **Router merge**
+- **Microservice gateway for local and remote service routers**
 - **Middleware**
 - **Event-triggered subscriptions**
 - **NDJSON and WebSocket subscription transports**
@@ -145,6 +146,48 @@ func main() {
 	fmt.Println(out.Message)
 }
 ```
+
+---
+
+## Microservices
+
+Use `neo.NewGateway()` when several Neo services should share one public API.
+Mount local routers for tests or development, and proxy remote services in
+production.
+
+```go
+gateway := neo.NewGateway()
+
+if err := gateway.Proxy("users", "http://localhost:8081/neo"); err != nil {
+	log.Fatal(err)
+}
+if err := gateway.Proxy("orders", "http://localhost:8082/neo"); err != nil {
+	log.Fatal(err)
+}
+
+log.Fatal(gateway.ListenAndServe(neo.ServerOptions{
+	Addr:   ":8080",
+	Prefix: "/neo/",
+}))
+```
+
+Clients call service-prefixed procedure keys:
+
+```go
+user, err := neo.CallTyped[GetUserInput, User](
+	ctx,
+	client.Query.Procedure("users.getByID"),
+	GetUserInput{ID: 1},
+)
+```
+
+The gateway forwards `users.getByID` to `getByID` on the users service. See
+`examples/microservices` for separate users, orders, gateway, and client
+commands.
+
+Gateway-only packages can still use `neo-gen`: add `neo.WithProxyMetadata(...)`
+to proxied services, then run the generator against the gateway package to
+produce service-prefixed typed clients.
 
 ---
 
