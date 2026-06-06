@@ -27,16 +27,22 @@ router.Register("user.create", neo.Mutation(func(ctx context.Context, in CreateU
 - **Nested routers**
 - **Router merge**
 - **Microservice gateway for local and remote service routers**
+- **Gateway health and metadata diagnostics**
 - **Middleware**
 - **Event-triggered subscriptions**
 - **NDJSON and WebSocket subscription transports**
 - **Pluggable event broker**
 - **Standard-library NATS broker adapter**
+- **Standard-library Redis broker adapter**
 - **CORS preflight support**
 - **Safe internal error redaction**
 - **POST queries for large payloads**
 - **Server hardening options**
 - **Codegen-friendly metadata**
+- **HTTP metadata introspection endpoint**
+- **Remote metadata input for code generation**
+- **Generated Markdown docs and JSON schema exports**
+- **Input validation hooks**
 - **Race-tested in-memory event bus**
 
 ---
@@ -188,6 +194,32 @@ commands.
 Gateway-only packages can still use `neo-gen`: add `neo.WithProxyMetadata(...)`
 to proxied services, then run the generator against the gateway package to
 produce service-prefixed typed clients.
+
+Gateways can also discover proxy metadata from upstream Neo services:
+
+```go
+if err := gateway.Proxy(
+	"users",
+	"http://localhost:8081/neo",
+	neo.WithProxyHeader("X-Service-Token", "internal-token"),
+	neo.WithProxyMetadataDiscovery(),
+); err != nil {
+	log.Fatal(err)
+}
+```
+
+`WithProxyMetadataDiscovery` fetches `/_meta` from the upstream service when the
+proxy is configured. Headers set with `WithProxyHeader` or `WithProxyHeaders`
+are sent with that metadata request.
+
+Gateway diagnostics are available at:
+
+```http
+GET /neo/_health
+```
+
+The response lists configured services, whether each one is local or proxied,
+and the metadata currently known for that service.
 
 ---
 
@@ -390,6 +422,34 @@ func main() {
 ```
 
 The NATS adapter publishes events as JSON and decodes subscription messages back into dynamic Go values. It preserves Neo's fire-and-forget event contract: publish errors are logged through `Options.Logger`, and slow local subscribers drop events when their buffer is full. For durable delivery, retries, or outbox semantics, wrap `EventBroker` with application-specific persistence.
+
+Use the built-in Redis adapter when Redis Pub/Sub is already part of your stack:
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/Protocol-Lattice/neo"
+	redisbroker "github.com/Protocol-Lattice/neo/broker/redis"
+)
+
+func main() {
+	router := neo.NewRouter()
+
+	broker := redisbroker.New(redisbroker.Options{
+		Addr:             "127.0.0.1:6379",
+		SubscriberBuffer: 64,
+		Logger:           log.Default(),
+	})
+	router.UseEvents(broker)
+}
+```
+
+The Redis adapter also publishes events as JSON and preserves Neo's best-effort
+contract. Publish or subscription errors are logged through `Options.Logger`,
+and slow local subscribers drop events when their buffer is full.
 
 The default in-memory bus is intentionally tiny and non-blocking. Slow subscribers do not block mutation handlers. Delivery is best-effort and lossy: if a subscriber buffer is full, new events for that subscriber are dropped. Use a distributed broker with explicit delivery guarantees for production multi-instance systems.
 
@@ -673,7 +733,7 @@ NDJSON subscriptions stream one JSON envelope per line. WebSocket subscriptions 
 
 ## Metadata
 
-Neo stores procedure metadata for code generation.
+Neo stores procedure metadata for code generation and runtime introspection.
 
 ```go
 metadata := router.Metadata()
@@ -687,7 +747,9 @@ Example metadata:
     "key": "user.get",
     "kind": "query",
     "input": "GetUserInput",
-    "output": "User"
+    "output": "User",
+    "summary": "Get user",
+    "tags": ["users", "read"]
   },
   {
     "key": "user.create",
@@ -698,7 +760,59 @@ Example metadata:
 ]
 ```
 
+Attach richer metadata when registering procedures:
+
+```go
+router.Register("user.get", neo.Query(
+	func(ctx context.Context, in GetUserInput) (User, error) {
+		return db.GetUser(ctx, in.ID)
+	},
+	neo.WithSummary("Get user"),
+	neo.WithDescription("Returns one user by ID."),
+	neo.WithTags("users", "read"),
+))
+```
+
+The same metadata is available over HTTP at the reserved metadata endpoint:
+
+```http
+GET /neo/_meta
+```
+
+Clients can fetch it without knowing the endpoint path:
+
+```go
+metadata, err := client.Metadata(context.Background())
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+Gateway metadata includes service prefixes for both mounted local routers and
+proxied services configured with `neo.WithProxyMetadata`.
+
 This is the foundation for generated typed clients.
+
+---
+
+## Validation
+
+Procedure inputs can implement `Validate() error`. Neo calls it after JSON
+decoding and before the handler runs. Validation errors are returned as
+`BAD_REQUEST`.
+
+```go
+type CreateUserInput struct {
+	Name string `json:"name"`
+}
+
+func (in CreateUserInput) Validate() error {
+	if in.Name == "" {
+		return errors.New("name is required")
+	}
+	return nil
+}
+```
 
 ---
 
@@ -762,6 +876,19 @@ Generate a typed client:
 ```bash
 go run ./cmd/neo-gen -dir ./examples -out ./examples/neo.gen.go
 ```
+
+Generate from a running server's metadata endpoint:
+
+```bash
+go run ./cmd/neo-gen \
+  -metadata-url http://localhost:8080/neo/_meta \
+  -package main \
+  -out ./neo.gen.go
+```
+
+When `-metadata-url` is set, `neo-gen` uses procedure metadata from the server.
+If `-dir` points at a local package, `neo-gen` still reads local type
+declarations for richer TypeScript output and package inference.
 
 Generate a TypeScript client:
 
@@ -827,6 +954,12 @@ func main() {
 	for event := range wsStream {
 		fmt.Printf("websocket event: %#v\n", event)
 	}
+
+	metadata, err := client.Metadata(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("procedures:", len(metadata))
 }
 ```
 
@@ -867,6 +1000,9 @@ for await (const event of client.user.changes.subscribe({})) {
 for await (const event of client.user.changes.subscribeWebSocket({})) {
   console.log(event.name);
 }
+
+const metadata = await client.metadata();
+console.log(metadata.length);
 ```
 
 See `examples/ts_client` for a runnable Go server plus TypeScript client use case.
@@ -884,6 +1020,7 @@ Current codegen gives you:
 
 - generated Go client namespaces
 - compile-time checked input/output types
+- generated Go client `Metadata(ctx)` helper
 - typed query and mutation `Call` methods
 - typed subscription `Subscribe` methods for NDJSON
 - typed subscription `SubscribeWebSocket` methods for WebSocket streams
@@ -891,15 +1028,19 @@ Current codegen gives you:
 - `NewTypedClientFromClient(client)` for shared custom clients
 - generated TypeScript local interfaces from Go structs and JSON tags
 - typed TypeScript query, mutation, NDJSON subscription, and WebSocket subscription helpers
+- TypeScript runtime `metadata()` helper
 - TypeScript client options for custom headers, custom `fetch`, and custom `WebSocket`
 - reusable generated TypeScript runtime via `-target ts-runtime`
 - named TypeScript placeholders for imported Go selector types that Neo cannot inspect locally
+- generated Markdown docs via `-target docs`
+- generated JSON schema exports via `-target schema`
 
-Future codegen goals:
+Generate Markdown docs or a JSON schema-style metadata export:
 
-- procedure discovery endpoint
-- generated docs
-- generated OpenAPI-like schema
+```bash
+go run ./cmd/neo-gen -dir ./examples -target docs -out ./API.md
+go run ./cmd/neo-gen -dir ./examples -target schema -out ./neo.schema.json
+```
 
 ---
 
@@ -1082,6 +1223,56 @@ See `examples/prisma_auth` for a runnable example that resolves an
 `Authorization: Bearer ...` token to a user ID, stores that user ID on
 `context.Context`, and uses a `neo-gen` typed client against a password-hash
 Prisma auth flow with `auth.login`, `auth.register`, and protected `user.me`.
+
+---
+
+## Slog Middleware Example
+
+```go
+func SlogMiddleware(logger *slog.Logger) neo.Middleware {
+	return func(next neo.Handler) neo.Handler {
+		return func(ctx context.Context, input any) (any, error) {
+			start := time.Now()
+
+			out, err := next(ctx, input)
+
+			attrs := []any{
+				"duration", time.Since(start),
+			}
+			if err != nil {
+				attrs = append(attrs, "error", err)
+				logger.ErrorContext(ctx, "neo procedure failed", attrs...)
+				return out, err
+			}
+
+			logger.InfoContext(ctx, "neo procedure completed", attrs...)
+			return out, nil
+		}
+	}
+}
+```
+
+---
+
+## Request ID Middleware Example
+
+```go
+type requestIDKey struct{}
+
+func RequestIDMiddleware(next neo.Handler) neo.Handler {
+	var seq atomic.Uint64
+
+	return func(ctx context.Context, input any) (any, error) {
+		id := strconv.FormatUint(seq.Add(1), 10)
+		ctx = context.WithValue(ctx, requestIDKey{}, id)
+		return next(ctx, input)
+	}
+}
+```
+
+Use this with logging middleware when you need procedure-level correlation.
+HTTP-level request IDs should be generated at your outer `net/http` middleware
+so they can also be returned in response headers.
 
 ---
 

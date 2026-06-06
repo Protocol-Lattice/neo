@@ -2,7 +2,7 @@
 
 import { NeoClientCore, type NeoCallOptions, type NeoClientOptions } from "./neo.runtime.ts";
 export { NeoError } from "./neo.runtime.ts";
-export type { NeoCallOptions, NeoClientOptions, NeoHeaders } from "./neo.runtime.ts";
+export type { NeoCallOptions, NeoClientOptions, NeoHeaders, NeoProcedureMeta } from "./neo.runtime.ts";
 
 export interface CreateUserInput {
   name: string;

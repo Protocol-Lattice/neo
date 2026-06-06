@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -17,11 +18,15 @@ import (
 )
 
 type procedure struct {
-	Receiver string
-	Key      string
-	Kind     string
-	Input    string
-	Output   string
+	Receiver    string
+	Key         string
+	Kind        string
+	Input       string
+	Output      string
+	Summary     string
+	Description string
+	Tags        []string
+	Deprecated  bool
 }
 
 type nestedRouter struct {
@@ -104,19 +109,13 @@ func scanPackage(dir string) (packageScan, error) {
 				return true
 			}
 
-			receiver, key, kind, in, out, ok := registerCall(call)
+			procedure, ok := registerCallProcedure(call)
 			if !ok {
 				return true
 			}
 
-			seenReceivers[receiver] = struct{}{}
-			procedures = append(procedures, procedure{
-				Receiver: receiver,
-				Key:      key,
-				Kind:     kind,
-				Input:    in,
-				Output:   out,
-			})
+			seenReceivers[procedure.Receiver] = struct{}{}
+			procedures = append(procedures, procedure)
 
 			return true
 		})
@@ -187,27 +186,41 @@ func typeParamNames(params *ast.FieldList) []string {
 }
 
 func registerCall(call *ast.CallExpr) (receiver, key, kind, input, output string, ok bool) {
+	p, ok := registerCallProcedure(call)
+	if !ok {
+		return "", "", "", "", "", false
+	}
+
+	return p.Receiver, p.Key, p.Kind, p.Input, p.Output, true
+}
+
+func registerCallProcedure(call *ast.CallExpr) (procedure, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || (sel.Sel.Name != "Register" && sel.Sel.Name != "RegisterSubscription") || len(call.Args) < 2 {
-		return "", "", "", "", "", false
+		return procedure{}, false
 	}
 
-	receiver, ok = selectorReceiverName(sel.X)
+	receiver, ok := selectorReceiverName(sel.X)
 	if !ok {
-		return "", "", "", "", "", false
+		return procedure{}, false
 	}
 
-	key, ok = stringLiteral(call.Args[0])
+	key, ok := stringLiteral(call.Args[0])
 	if !ok || key == "" {
-		return "", "", "", "", "", false
+		return procedure{}, false
 	}
 
-	kind, input, output, ok = typedProcedure(call.Args[1])
+	kind, input, output, meta, ok := typedProcedureMetadata(call.Args[1])
 	if !ok {
-		return "", "", "", "", "", false
+		return procedure{}, false
 	}
 
-	return receiver, key, kind, input, output, true
+	meta.Receiver = receiver
+	meta.Key = key
+	meta.Kind = kind
+	meta.Input = input
+	meta.Output = output
+	return meta, true
 }
 
 func routerPrefixCall(call *ast.CallExpr) (parent, prefix, child string, ok bool) {
@@ -299,8 +312,21 @@ func procedureMeta(receiver string, prefix string, expr ast.Expr) (procedure, bo
 		return procedure{}, false
 	}
 
-	var p procedure
+	p := procedureMetaLiteral(lit)
 	p.Receiver = receiver
+
+	if p.Key == "" || p.Input == "" || p.Output == "" {
+		return procedure{}, false
+	}
+	if p.Kind == "" {
+		p.Kind = "query"
+	}
+	p.Key = fullProcedureKey(prefix, p.Key)
+	return p, true
+}
+
+func procedureMetaLiteral(lit *ast.CompositeLit) procedure {
+	var p procedure
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
@@ -320,17 +346,17 @@ func procedureMeta(receiver string, prefix string, expr ast.Expr) (procedure, bo
 			p.Input, _ = stringLiteral(kv.Value)
 		case "Output":
 			p.Output, _ = stringLiteral(kv.Value)
+		case "Summary":
+			p.Summary, _ = stringLiteral(kv.Value)
+		case "Description":
+			p.Description, _ = stringLiteral(kv.Value)
+		case "Tags":
+			p.Tags, _ = stringSliceLiteral(kv.Value)
+		case "Deprecated":
+			p.Deprecated, _ = boolLiteral(kv.Value)
 		}
 	}
-
-	if p.Key == "" || p.Input == "" || p.Output == "" {
-		return procedure{}, false
-	}
-	if p.Kind == "" {
-		p.Kind = "query"
-	}
-	p.Key = fullProcedureKey(prefix, p.Key)
-	return p, true
+	return p
 }
 
 func procedureKind(expr ast.Expr) (string, bool) {
@@ -464,14 +490,19 @@ func joinKey(left, right string) string {
 }
 
 func typedProcedure(expr ast.Expr) (kind string, input string, output string, ok bool) {
+	kind, input, output, _, ok = typedProcedureMetadata(expr)
+	return kind, input, output, ok
+}
+
+func typedProcedureMetadata(expr ast.Expr) (kind string, input string, output string, meta procedure, ok bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
-		return "", "", "", false
+		return "", "", "", procedure{}, false
 	}
 
 	name, typeArgs, ok := genericCall(call.Fun)
 	if !ok || len(typeArgs) != 2 {
-		return "", "", "", false
+		return "", "", "", procedure{}, false
 	}
 
 	switch name {
@@ -482,10 +513,76 @@ func typedProcedure(expr ast.Expr) (kind string, input string, output string, ok
 	case "Subscription":
 		kind = "subscription"
 	default:
-		return "", "", "", false
+		return "", "", "", procedure{}, false
 	}
 
-	return kind, exprString(typeArgs[0]), exprString(typeArgs[1]), true
+	meta = procedureOptions(call.Args)
+	return kind, exprString(typeArgs[0]), exprString(typeArgs[1]), meta, true
+}
+
+func procedureOptions(args []ast.Expr) procedure {
+	var meta procedure
+	for _, arg := range args {
+		call, ok := arg.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		name, ok := selectorName(call.Fun)
+		if !ok {
+			continue
+		}
+
+		switch name {
+		case "WithSummary":
+			if len(call.Args) > 0 {
+				meta.Summary, _ = stringLiteral(call.Args[0])
+			}
+		case "WithDescription":
+			if len(call.Args) > 0 {
+				meta.Description, _ = stringLiteral(call.Args[0])
+			}
+		case "WithTags":
+			for _, arg := range call.Args {
+				if tag, ok := stringLiteral(arg); ok {
+					meta.Tags = append(meta.Tags, tag)
+				}
+			}
+		case "WithDeprecated":
+			meta.Deprecated = true
+			if len(call.Args) > 0 {
+				meta.Deprecated, _ = boolLiteral(call.Args[0])
+			}
+		case "WithProcedureMeta":
+			if len(call.Args) == 0 {
+				continue
+			}
+			lit, ok := call.Args[0].(*ast.CompositeLit)
+			if !ok {
+				continue
+			}
+			typeName, ok := selectorName(lit.Type)
+			if !ok || typeName != "ProcedureMeta" {
+				continue
+			}
+			mergeProcedureMetadata(&meta, procedureMetaLiteral(lit))
+		}
+	}
+	return meta
+}
+
+func mergeProcedureMetadata(target *procedure, source procedure) {
+	if source.Summary != "" {
+		target.Summary = source.Summary
+	}
+	if source.Description != "" {
+		target.Description = source.Description
+	}
+	if len(source.Tags) > 0 {
+		target.Tags = append(target.Tags, source.Tags...)
+	}
+	if source.Deprecated {
+		target.Deprecated = true
+	}
 }
 
 func genericCall(expr ast.Expr) (string, []ast.Expr, bool) {
@@ -541,6 +638,38 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 	return value, true
 }
 
+func boolLiteral(expr ast.Expr) (bool, bool) {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return false, false
+	}
+	switch ident.Name {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func stringSliceLiteral(expr ast.Expr) ([]string, bool) {
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return nil, false
+	}
+
+	var values []string
+	for _, elt := range lit.Elts {
+		value, ok := stringLiteral(elt)
+		if !ok {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
+}
+
 func exprString(expr ast.Expr) string {
 	var buf bytes.Buffer
 	_ = format.Node(&buf, token.NewFileSet(), expr)
@@ -593,6 +722,10 @@ func generate(pkg string, procedures []procedure) ([]byte, error) {
 	b.WriteString("\treturn tc\n")
 	b.WriteString("}\n\n")
 
+	b.WriteString("func (tc *TypedClient) Metadata(ctx context.Context) ([]neo.ProcedureMeta, error) {\n")
+	b.WriteString("\treturn tc.client.Metadata(ctx)\n")
+	b.WriteString("}\n\n")
+
 	for _, group := range sortedKeys(groups) {
 		fmt.Fprintf(&b, "type %sClient struct {\n", exportName(group))
 		b.WriteString("\tclient *neo.Client\n")
@@ -642,11 +775,96 @@ func generateTypeScriptRuntime() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+func generateDocs(procedures []procedure) ([]byte, error) {
+	procedures = sortedProcedures(procedures)
+
+	var b bytes.Buffer
+	b.WriteString("# Neo API\n\n")
+	if len(procedures) == 0 {
+		b.WriteString("No procedures discovered.\n")
+		return b.Bytes(), nil
+	}
+
+	for _, p := range procedures {
+		fmt.Fprintf(&b, "## `%s`\n\n", p.Key)
+		if p.Summary != "" {
+			fmt.Fprintf(&b, "%s\n\n", p.Summary)
+		}
+		if p.Deprecated {
+			b.WriteString("> Deprecated.\n\n")
+		}
+		fmt.Fprintf(&b, "- Kind: `%s`\n", p.Kind)
+		fmt.Fprintf(&b, "- Input: `%s`\n", p.Input)
+		fmt.Fprintf(&b, "- Output: `%s`\n", p.Output)
+		if len(p.Tags) > 0 {
+			fmt.Fprintf(&b, "- Tags: `%s`\n", strings.Join(p.Tags, "`, `"))
+		}
+		b.WriteString("\n")
+		if p.Description != "" {
+			fmt.Fprintf(&b, "%s\n\n", p.Description)
+		}
+	}
+
+	return b.Bytes(), nil
+}
+
+type schemaDocument struct {
+	Schema     string            `json:"schema"`
+	Procedures []schemaProcedure `json:"procedures"`
+}
+
+type schemaProcedure struct {
+	Key         string   `json:"key"`
+	Kind        string   `json:"kind"`
+	Input       string   `json:"input"`
+	Output      string   `json:"output"`
+	Summary     string   `json:"summary,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Deprecated  bool     `json:"deprecated,omitempty"`
+}
+
+func generateSchema(procedures []procedure) ([]byte, error) {
+	procedures = sortedProcedures(procedures)
+
+	doc := schemaDocument{
+		Schema:     "https://protocol-lattice.github.io/neo/schema/v1",
+		Procedures: make([]schemaProcedure, 0, len(procedures)),
+	}
+	for _, p := range procedures {
+		doc.Procedures = append(doc.Procedures, schemaProcedure{
+			Key:         p.Key,
+			Kind:        p.Kind,
+			Input:       p.Input,
+			Output:      p.Output,
+			Summary:     p.Summary,
+			Description: p.Description,
+			Tags:        p.Tags,
+			Deprecated:  p.Deprecated,
+		})
+	}
+
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, '\n')
+	return out, nil
+}
+
+func sortedProcedures(procedures []procedure) []procedure {
+	out := append([]procedure(nil), procedures...)
+	slices.SortFunc(out, func(a, b procedure) int {
+		return cmp.Compare(a.Key, b.Key)
+	})
+	return out
+}
+
 func writeTypeScriptRuntimeImport(b *bytes.Buffer, runtimeImport string) {
 	quoted := strconv.Quote(runtimeImport)
 	fmt.Fprintf(b, "import { NeoClientCore, type NeoCallOptions, type NeoClientOptions } from %s;\n", quoted)
 	fmt.Fprintf(b, "export { NeoError } from %s;\n", quoted)
-	fmt.Fprintf(b, "export type { NeoCallOptions, NeoClientOptions, NeoHeaders } from %s;\n\n", quoted)
+	fmt.Fprintf(b, "export type { NeoCallOptions, NeoClientOptions, NeoHeaders, NeoProcedureMeta } from %s;\n\n", quoted)
 }
 
 func writeTypeScriptRuntime(b *bytes.Buffer) {
@@ -711,6 +929,17 @@ type NeoResponse<T> = {
   error?: string;
 };
 
+export type NeoProcedureMeta = {
+  key: string;
+  kind: "query" | "mutation" | "subscription" | string;
+  input: string;
+  output: string;
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  deprecated?: boolean;
+};
+
 declare const TextDecoder: {
   new (): {
     decode(input?: Uint8Array, options?: { stream?: boolean }): string;
@@ -760,9 +989,14 @@ type externalTypeRef struct {
 
 func collectExternalTypeRefs(procedures []procedure, types []typeDeclaration) []externalTypeRef {
 	refs := make(map[string]int)
+	declared := make(map[string]struct{}, len(types))
+	for _, typ := range types {
+		declared[typ.Name] = struct{}{}
+	}
+
 	for _, p := range procedures {
-		collectExternalTypeRefsFromTypeString(p.Input, refs)
-		collectExternalTypeRefsFromTypeString(p.Output, refs)
+		collectProcedureExternalTypeRefsFromTypeString(p.Input, refs, declared)
+		collectProcedureExternalTypeRefsFromTypeString(p.Output, refs, declared)
 	}
 	for _, typ := range types {
 		collectExternalTypeRefsFromExpr(typ.Type, refs)
@@ -776,6 +1010,84 @@ func collectExternalTypeRefs(procedures []procedure, types []typeDeclaration) []
 		return cmp.Compare(a.Name, b.Name)
 	})
 	return out
+}
+
+func collectProcedureExternalTypeRefsFromTypeString(typeName string, refs map[string]int, declared map[string]struct{}) {
+	expr, err := parser.ParseExpr(typeName)
+	if err != nil {
+		return
+	}
+	collectProcedureExternalTypeRefsFromExpr(expr, refs, declared)
+}
+
+func collectProcedureExternalTypeRefsFromExpr(expr ast.Expr, refs map[string]int, declared map[string]struct{}) {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if isExternalProcedureIdent(e.Name, declared) {
+			recordExternalTypeRef(refs, typeScriptTypeIdentifier(e.Name), 0)
+		}
+	case *ast.SelectorExpr:
+		if !isKnownSelectorType(e) {
+			recordExternalTypeRef(refs, typeScriptExternalTypeName(e), 0)
+		}
+	case *ast.StarExpr:
+		collectProcedureExternalTypeRefsFromExpr(e.X, refs, declared)
+	case *ast.ArrayType:
+		collectProcedureExternalTypeRefsFromExpr(e.Elt, refs, declared)
+	case *ast.MapType:
+		collectProcedureExternalTypeRefsFromExpr(e.Key, refs, declared)
+		collectProcedureExternalTypeRefsFromExpr(e.Value, refs, declared)
+	case *ast.StructType:
+		if e.Fields == nil {
+			return
+		}
+		for _, field := range e.Fields.List {
+			collectProcedureExternalTypeRefsFromExpr(field.Type, refs, declared)
+		}
+	case *ast.ChanType:
+		collectProcedureExternalTypeRefsFromExpr(e.Value, refs, declared)
+	case *ast.IndexExpr:
+		if ident, ok := e.X.(*ast.Ident); ok && isExternalProcedureIdent(ident.Name, declared) {
+			recordExternalTypeRef(refs, typeScriptTypeIdentifier(ident.Name), 1)
+		} else if selector, ok := e.X.(*ast.SelectorExpr); ok && !isKnownSelectorType(selector) {
+			recordExternalTypeRef(refs, typeScriptExternalTypeName(selector), 1)
+		} else {
+			collectProcedureExternalTypeRefsFromExpr(e.X, refs, declared)
+		}
+		collectProcedureExternalTypeRefsFromExpr(e.Index, refs, declared)
+	case *ast.IndexListExpr:
+		if ident, ok := e.X.(*ast.Ident); ok && isExternalProcedureIdent(ident.Name, declared) {
+			recordExternalTypeRef(refs, typeScriptTypeIdentifier(ident.Name), len(e.Indices))
+		} else if selector, ok := e.X.(*ast.SelectorExpr); ok && !isKnownSelectorType(selector) {
+			recordExternalTypeRef(refs, typeScriptExternalTypeName(selector), len(e.Indices))
+		} else {
+			collectProcedureExternalTypeRefsFromExpr(e.X, refs, declared)
+		}
+		for _, index := range e.Indices {
+			collectProcedureExternalTypeRefsFromExpr(index, refs, declared)
+		}
+	case *ast.ParenExpr:
+		collectProcedureExternalTypeRefsFromExpr(e.X, refs, declared)
+	}
+}
+
+func isExternalProcedureIdent(name string, declared map[string]struct{}) bool {
+	if _, ok := declared[name]; ok {
+		return false
+	}
+	return !isBuiltInGoIdent(name)
+}
+
+func isBuiltInGoIdent(name string) bool {
+	switch name {
+	case "any", "bool", "byte", "comparable", "complex64", "complex128",
+		"error", "float32", "float64", "int", "int8", "int16", "int32",
+		"int64", "rune", "string", "uint", "uint8", "uint16", "uint32",
+		"uint64", "uintptr":
+		return true
+	default:
+		return false
+	}
 }
 
 func collectExternalTypeRefsFromTypeString(typeName string, refs map[string]int) {
@@ -983,6 +1295,34 @@ func writeTypeScriptTransportMethods(b *bytes.Buffer) {
       throw this.toError(payload, response.status);
     }
     return payload.result as Out;
+  }
+
+  async metadata(options: NeoCallOptions = {}): Promise<NeoProcedureMeta[]> {
+    const response = await this.fetchFn(this.urlFor("_meta"), {
+      method: "GET",
+      headers: this.mergeHeaders(options.headers, "application/json"),
+      signal: options.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let payload: NeoResponse<unknown> = {};
+      if (text !== "") {
+        try {
+          payload = JSON.parse(text) as NeoResponse<unknown>;
+        } catch {
+          throw new Error("Neo metadata response was not valid JSON");
+        }
+      }
+      throw this.toError(payload, response.status);
+    }
+    if (text === "") {
+      return [];
+    }
+    try {
+      return JSON.parse(text) as NeoProcedureMeta[];
+    } catch {
+      throw new Error("Neo metadata response was not valid JSON");
+    }
   }
 
   async *subscribe<In, Out>(

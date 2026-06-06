@@ -186,6 +186,145 @@ func TestGatewayMetadataPrefixesLocalAndRemoteServices(t *testing.T) {
 	}
 }
 
+func TestGatewayMetadataEndpointReturnsPrefixedMetadata(t *testing.T) {
+	users := NewRouter()
+	users.Register("getByID", Query(func(context.Context, testInput) (testOutput, error) {
+		return testOutput{}, nil
+	}))
+
+	gateway := NewGateway()
+	if err := gateway.Mount("users", users); err != nil {
+		t.Fatalf("mount users: %v", err)
+	}
+	if err := gateway.Proxy("orders", "http://orders.example/neo", WithProxyMetadata(ProcedureMeta{
+		Key:    "create",
+		Kind:   ProcedureKindMutation,
+		Input:  "CreateOrderInput",
+		Output: "Order",
+	})); err != nil {
+		t.Fatalf("proxy orders: %v", err)
+	}
+
+	server := newGatewayTestServer(gateway)
+	defer server.Close()
+
+	res, err := http.Get(server.URL + "/neo/" + MetadataPath)
+	if err != nil {
+		t.Fatalf("get metadata: %v", err)
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+
+	var metadata []ProcedureMeta
+	if err := json.NewDecoder(res.Body).Decode(&metadata); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	if len(metadata) != 2 {
+		t.Fatalf("metadata len = %d, want 2", len(metadata))
+	}
+	got := []string{metadata[0].Key, metadata[1].Key}
+	want := []string{"orders.create", "users.getByID"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("metadata keys = %#v, want %#v", got, want)
+	}
+}
+
+func TestGatewayProxyDiscoversMetadataFromUpstream(t *testing.T) {
+	users := NewRouter()
+	users.Register("getByID", Query(func(context.Context, testInput) (testOutput, error) {
+		return testOutput{}, nil
+	}))
+
+	upstreamMux := http.NewServeMux()
+	users.ServeHTTP(upstreamMux, "/neo/")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/neo/"+MetadataPath && r.Header.Get("X-Service-Token") != "token-1" {
+			writeProcedureError(w, NewError(CodeUnauthorized, "missing service token"))
+			return
+		}
+		upstreamMux.ServeHTTP(w, r)
+	}))
+	defer upstream.Close()
+
+	gateway := NewGateway()
+	if err := gateway.Proxy(
+		"users",
+		upstream.URL+"/neo",
+		WithProxyHeader("X-Service-Token", "token-1"),
+		WithProxyMetadataDiscovery(),
+	); err != nil {
+		t.Fatalf("proxy users: %v", err)
+	}
+
+	metadata := gateway.Metadata()
+	if len(metadata) != 1 {
+		t.Fatalf("metadata len = %d, want 1", len(metadata))
+	}
+	if metadata[0].Key != "users.getByID" || metadata[0].Kind != ProcedureKindQuery {
+		t.Fatalf("metadata = %#v, want discovered users.getByID query", metadata[0])
+	}
+}
+
+func TestGatewayDiagnosticsEndpointReturnsServices(t *testing.T) {
+	users := NewRouter()
+	users.Register("getByID", Query(func(context.Context, testInput) (testOutput, error) {
+		return testOutput{}, nil
+	}))
+
+	gateway := NewGateway()
+	if err := gateway.Mount("users", users); err != nil {
+		t.Fatalf("mount users: %v", err)
+	}
+	if err := gateway.Proxy("orders", "http://orders.example/neo", WithProxyMetadata(ProcedureMeta{
+		Key:    "create",
+		Kind:   ProcedureKindMutation,
+		Input:  "CreateOrderInput",
+		Output: "Order",
+	})); err != nil {
+		t.Fatalf("proxy orders: %v", err)
+	}
+
+	server := newGatewayTestServer(gateway)
+	defer server.Close()
+
+	res, err := http.Get(server.URL + "/neo/" + GatewayHealthPath)
+	if err != nil {
+		t.Fatalf("get diagnostics: %v", err)
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+
+	var diagnostics GatewayDiagnostics
+	if err := json.NewDecoder(res.Body).Decode(&diagnostics); err != nil {
+		t.Fatalf("decode diagnostics: %v", err)
+	}
+	if len(diagnostics.Services) != 2 {
+		t.Fatalf("services len = %d, want 2", len(diagnostics.Services))
+	}
+	if diagnostics.Services[0].Prefix != "orders" || diagnostics.Services[0].Mode != "proxy" {
+		t.Fatalf("first service = %#v, want orders proxy", diagnostics.Services[0])
+	}
+	if diagnostics.Services[0].ProcedureCount != 1 || diagnostics.Services[0].Procedures[0].Key != "orders.create" {
+		t.Fatalf("orders diagnostics = %#v, want orders.create", diagnostics.Services[0])
+	}
+	if diagnostics.Services[1].Prefix != "users" || diagnostics.Services[1].Mode != "local" {
+		t.Fatalf("second service = %#v, want users local", diagnostics.Services[1])
+	}
+	if diagnostics.Services[1].ProcedureCount != 1 || diagnostics.Services[1].Procedures[0].Key != "users.getByID" {
+		t.Fatalf("users diagnostics = %#v, want users.getByID", diagnostics.Services[1])
+	}
+}
+
 func TestGatewayUnknownServiceReturnsNotFound(t *testing.T) {
 	gateway := NewGateway()
 	server := newGatewayTestServer(gateway)

@@ -25,6 +25,7 @@ Use Neo when you want:
 - A small RPC layer over HTTP.
 - Nested routers for modular APIs.
 - Gateway composition for local and remote microservices.
+- Gateway service diagnostics through `/neo/_health`.
 - Middleware around procedure execution.
 - Event-triggered subscriptions.
 - NDJSON subscription streaming.
@@ -32,6 +33,10 @@ Use Neo when you want:
 - Generated typed Go clients.
 - Generated TypeScript clients for frontend apps.
 - Codegen-friendly metadata.
+- HTTP metadata introspection through `/neo/_meta`.
+- `neo-gen -metadata-url` for generating clients from a running service.
+- Generated Markdown docs and JSON schema exports.
+- Input validation hooks through `Validate() error`.
 - Standard-library-friendly server integration.
 
 Neo is not trying to beat hand-written `net/http` handlers in raw microbenchmarks. It optimizes for API development speed, type-friendly ergonomics, fewer routing mistakes, generated clients, and real-time subscription support.
@@ -50,6 +55,7 @@ Expected top-level files and directories:
 - `errors.go` — structured Neo errors and error codes.
 - `json.go` — request/response JSON envelope helpers.
 - `broker/nats` — built-in NATS broker adapter.
+- `broker/redis` — built-in Redis Pub/Sub broker adapter.
 - `cmd/neo-gen` — code generator for Go and TypeScript clients.
 - `examples` — runnable examples, including TypeScript client and Prisma auth examples.
 - `*_test.go` — tests for router, procedures, client, event bus, middleware, JSON, errors, WebSocket, and benchmarks.
@@ -95,6 +101,41 @@ Or mount into an existing mux:
 mux := http.NewServeMux()
 router.ServeHTTP(mux, "/neo/")
 ```
+
+Procedure metadata is available in-process and over HTTP:
+
+```go
+metadata := router.Metadata()
+```
+
+```http
+GET /neo/_meta
+```
+
+Client helpers can fetch the same metadata:
+
+```go
+metadata, err := client.Metadata(context.Background())
+```
+
+Procedure metadata supports optional `summary`, `description`, `tags`, and
+`deprecated` fields. Attach these with `neo.WithSummary`,
+`neo.WithDescription`, `neo.WithTags`, `neo.WithDeprecated`, or
+`neo.WithProcedureMeta`.
+
+Procedure inputs may implement `Validate() error`; Neo runs validation after
+decoding and returns `BAD_REQUEST` on validation failure.
+
+Gateways expose service diagnostics:
+
+```http
+GET /neo/_health
+```
+
+Use `neo.WithProxyMetadataDiscovery()` when proxying a Neo service if the
+gateway should fetch the upstream service's `/_meta` endpoint during
+configuration. Headers configured with `neo.WithProxyHeader` or
+`neo.WithProxyHeaders` are sent with that metadata request.
 
 ### Queries
 
@@ -248,6 +289,14 @@ Generate a standalone TypeScript client:
 go run ./cmd/neo-gen -dir ./examples/ts_client -out ./examples/ts_client/neo.gen.ts -target ts-standalone
 ```
 
+Generate from a running server and generate docs/schema:
+
+```bash
+go run ./cmd/neo-gen -metadata-url http://localhost:8080/neo/_meta -package main -out ./neo.gen.go
+go run ./cmd/neo-gen -dir ./examples -target docs -out ./API.md
+go run ./cmd/neo-gen -dir ./examples -target schema -out ./neo.schema.json
+```
+
 Generated Go client style:
 
 ```go
@@ -260,6 +309,7 @@ user, err := client.User.GetByID.Call(ctx, GetUserInput{ID: 1})
 created, err := client.User.Create.Call(ctx, CreateUserInput{Name: "Neo"})
 stream, err := client.User.Changes.Subscribe(ctx, NoInput{})
 wsStream, err := client.User.Changes.SubscribeWebSocket(ctx, NoInput{})
+metadata, err := client.Metadata(ctx)
 ```
 
 Generated TypeScript client style:
@@ -283,6 +333,8 @@ for await (const event of client.user.changes.subscribe({})) {
 for await (const event of client.user.changes.subscribeWebSocket({})) {
   console.log(event.name);
 }
+
+const metadata = await client.metadata();
 ```
 
 Important TypeScript WebSocket note:
@@ -317,11 +369,8 @@ Metadata shape:
 ]
 ```
 
-Future codegen directions include:
-
-- Procedure discovery endpoint.
-- Generated docs.
-- Generated OpenAPI-like schema.
+Current codegen targets include Go clients, TypeScript clients, TypeScript
+runtime, standalone TypeScript, Markdown docs, and JSON schema exports.
 
 ## Event broker
 
@@ -372,6 +421,20 @@ router.UseEvents(broker)
 ```
 
 The NATS adapter publishes events as JSON and decodes subscription messages back into dynamic Go values. It preserves Neo's fire-and-forget event contract. For durable delivery, retries, or outbox semantics, wrap `EventBroker` with application-specific persistence.
+
+Use the built-in Redis adapter when Redis Pub/Sub is already available:
+
+```go
+broker := redisbroker.New(redisbroker.Options{
+    Addr:             "127.0.0.1:6379",
+    SubscriberBuffer: 64,
+    Logger:           log.Default(),
+})
+router.UseEvents(broker)
+```
+
+The Redis adapter also publishes JSON events and preserves Neo's best-effort,
+fire-and-forget event contract.
 
 ## Middleware
 

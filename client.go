@@ -126,6 +126,12 @@ func (procedure *ClientProcedure) Subscribe(ctx context.Context, input any) (<-c
 	return procedure.client.subscribe(ctx, procedure.key, procedure.endpoint, input)
 }
 
+// Metadata fetches procedure metadata from the server's reserved metadata
+// endpoint.
+func (client *Client) Metadata(ctx context.Context) ([]ProcedureMeta, error) {
+	return fetchProcedureMetadata(ctx, client.http, client.endpoint(MetadataPath), client.headers)
+}
+
 func CallTyped[In, Out any](ctx context.Context, procedure *ClientProcedure, input In) (Out, error) {
 	return callTyped[In, Out](ctx, procedure.client, procedure.method, procedure.key, procedure.endpoint, input)
 }

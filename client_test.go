@@ -152,6 +152,38 @@ func TestClientCallRejectsInvalidResponseJSON(t *testing.T) {
 	}
 }
 
+func TestClientMetadataFetchesProcedureMetadata(t *testing.T) {
+	router := NewRouter()
+	router.Register("hello", Query(func(context.Context, testInput) (testOutput, error) {
+		return testOutput{Message: "hi"}, nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token" {
+			t.Fatalf("authorization header = %q, want Bearer token", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("accept = %q, want application/json", got)
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL+"/neo", WithHeader("Authorization", "Bearer token"))
+	metadata, err := client.Metadata(context.Background())
+	if err != nil {
+		t.Fatalf("metadata: %v", err)
+	}
+	if len(metadata) != 1 {
+		t.Fatalf("metadata len = %d, want 1", len(metadata))
+	}
+	if metadata[0].Key != "hello" || metadata[0].Kind != ProcedureKindQuery {
+		t.Fatalf("metadata = %#v, want hello query", metadata[0])
+	}
+}
+
 func TestClientSubscribeReadsNDJSONStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Accept"); got != "application/x-ndjson" {

@@ -61,6 +61,17 @@ type NeoResponse<T> = {
   error?: string;
 };
 
+export type NeoProcedureMeta = {
+  key: string;
+  kind: "query" | "mutation" | "subscription" | string;
+  input: string;
+  output: string;
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  deprecated?: boolean;
+};
+
 declare const TextDecoder: {
   new (): {
     decode(input?: Uint8Array, options?: { stream?: boolean }): string;
@@ -136,6 +147,34 @@ export class NeoClientCore {
       throw this.toError(payload, response.status);
     }
     return payload.result as Out;
+  }
+
+  async metadata(options: NeoCallOptions = {}): Promise<NeoProcedureMeta[]> {
+    const response = await this.fetchFn(this.urlFor("_meta"), {
+      method: "GET",
+      headers: this.mergeHeaders(options.headers, "application/json"),
+      signal: options.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let payload: NeoResponse<unknown> = {};
+      if (text !== "") {
+        try {
+          payload = JSON.parse(text) as NeoResponse<unknown>;
+        } catch {
+          throw new Error("Neo metadata response was not valid JSON");
+        }
+      }
+      throw this.toError(payload, response.status);
+    }
+    if (text === "") {
+      return [];
+    }
+    try {
+      return JSON.parse(text) as NeoProcedureMeta[];
+    } catch {
+      throw new Error("Neo metadata response was not valid JSON");
+    }
   }
 
   async *subscribe<In, Out>(

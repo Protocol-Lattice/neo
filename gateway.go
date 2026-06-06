@@ -3,6 +3,7 @@ package neo
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,7 +11,13 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 )
+
+// GatewayHealthPath is the reserved path under a gateway HTTP prefix that
+// exposes service diagnostics as JSON. With the default prefix, the endpoint is
+// /neo/_health.
+const GatewayHealthPath = "_health"
 
 // Gateway exposes several Neo services behind a single HTTP prefix.
 //
@@ -34,9 +41,24 @@ type gatewayService struct {
 type ProxyOption func(*proxyOptions)
 
 type proxyOptions struct {
-	transport http.RoundTripper
-	headers   http.Header
-	metadata  []ProcedureMeta
+	transport        http.RoundTripper
+	headers          http.Header
+	metadata         []ProcedureMeta
+	discoverMetadata bool
+	metadataTimeout  time.Duration
+}
+
+// GatewayDiagnostics describes the services configured behind a gateway.
+type GatewayDiagnostics struct {
+	Services []GatewayServiceDiagnostics `json:"services"`
+}
+
+// GatewayServiceDiagnostics describes one mounted or proxied service.
+type GatewayServiceDiagnostics struct {
+	Prefix         string          `json:"prefix"`
+	Mode           string          `json:"mode"`
+	ProcedureCount int             `json:"procedureCount"`
+	Procedures     []ProcedureMeta `json:"procedures,omitempty"`
 }
 
 // NewGateway creates an empty microservice gateway.
@@ -72,6 +94,28 @@ func WithProxyHeaders(headers http.Header) ProxyOption {
 			for _, value := range values {
 				opts.headers.Add(name, value)
 			}
+		}
+	}
+}
+
+// WithProxyMetadataDiscovery fetches procedure metadata from the upstream
+// service's reserved metadata endpoint when Proxy is called.
+//
+// Headers configured with WithProxyHeader or WithProxyHeaders are sent with the
+// metadata request, which lets gateways use the same service-auth headers for
+// diagnostics and code generation metadata as they use for proxied calls.
+func WithProxyMetadataDiscovery() ProxyOption {
+	return func(opts *proxyOptions) {
+		opts.discoverMetadata = true
+	}
+}
+
+// WithProxyMetadataTimeout sets the metadata discovery request timeout.
+// Non-positive durations are ignored. The default is 5 seconds.
+func WithProxyMetadataTimeout(timeout time.Duration) ProxyOption {
+	return func(opts *proxyOptions) {
+		if timeout > 0 {
+			opts.metadataTimeout = timeout
 		}
 	}
 }
@@ -133,6 +177,17 @@ func (gateway *Gateway) Proxy(prefix string, target string, opts ...ProxyOption)
 			opt(&proxyOpts)
 		}
 	}
+	if proxyOpts.metadataTimeout == 0 {
+		proxyOpts.metadataTimeout = 5 * time.Second
+	}
+	metadata := slices.Clone(proxyOpts.metadata)
+	if proxyOpts.discoverMetadata {
+		discovered, err := discoverProxyMetadata(targetURL, proxyOpts)
+		if err != nil {
+			return fmt.Errorf("discover proxy metadata for %q: %w", prefix, err)
+		}
+		metadata = append(metadata, discovered...)
+	}
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
@@ -162,7 +217,7 @@ func (gateway *Gateway) Proxy(prefix string, target string, opts ...ProxyOption)
 	gateway.services[prefix] = gatewayService{
 		prefix:   prefix,
 		proxy:    proxy,
-		metadata: slices.Clone(proxyOpts.metadata),
+		metadata: metadata,
 	}
 	return nil
 }
@@ -199,6 +254,46 @@ func (gateway *Gateway) Metadata() []ProcedureMeta {
 		return cmp.Compare(a.Key, b.Key)
 	})
 	return metas
+}
+
+// Diagnostics returns configured gateway services, their mode, and the
+// procedure metadata currently known for each service.
+func (gateway *Gateway) Diagnostics() GatewayDiagnostics {
+	if gateway == nil {
+		return GatewayDiagnostics{}
+	}
+
+	prefixes := make([]string, 0, len(gateway.services))
+	for prefix := range gateway.services {
+		prefixes = append(prefixes, prefix)
+	}
+	slices.Sort(prefixes)
+
+	services := make([]GatewayServiceDiagnostics, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		service := gateway.services[prefix]
+		mode := "proxy"
+		metadata := slices.Clone(service.metadata)
+		if service.router != nil {
+			mode = "local"
+			metadata = service.router.Metadata()
+		}
+		for i := range metadata {
+			metadata[i].Key = joinProcedureKey(prefix, metadata[i].Key)
+		}
+		slices.SortFunc(metadata, func(a, b ProcedureMeta) int {
+			return cmp.Compare(a.Key, b.Key)
+		})
+
+		services = append(services, GatewayServiceDiagnostics{
+			Prefix:         prefix,
+			Mode:           mode,
+			ProcedureCount: len(metadata),
+			Procedures:     metadata,
+		})
+	}
+
+	return GatewayDiagnostics{Services: services}
 }
 
 // Serve starts a hardened HTTP server on :8080 using the default /neo/ prefix.
@@ -250,6 +345,15 @@ func (gateway *Gateway) HTTPHandler(prefix string) http.Handler {
 		}
 
 		key := gatewayRequestKey(r, prefix)
+		if key == MetadataPath {
+			serveProcedureMetadata(w, r, gateway.Metadata())
+			return
+		}
+		if key == GatewayHealthPath {
+			serveGatewayDiagnostics(w, r, gateway.Diagnostics())
+			return
+		}
+
 		service, subkey, ok := gateway.match(key)
 		if !ok {
 			writeProcedureError(w, NewError(CodeNotFound, "service not found"))
@@ -296,6 +400,47 @@ func (gateway *Gateway) match(key string) (gatewayService, string, bool) {
 	}
 
 	return gatewayService{}, "", false
+}
+
+func discoverProxyMetadata(targetURL *url.URL, opts proxyOptions) ([]ProcedureMeta, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), opts.metadataTimeout)
+	defer cancel()
+
+	httpClient := &http.Client{Timeout: opts.metadataTimeout}
+	if opts.transport != nil {
+		httpClient.Transport = opts.transport
+	}
+
+	return fetchProcedureMetadata(ctx, httpClient, proxyMetadataEndpoint(targetURL), opts.headers)
+}
+
+func proxyMetadataEndpoint(targetURL *url.URL) string {
+	if targetURL == nil {
+		return "/" + MetadataPath
+	}
+
+	metadataURL := *targetURL
+	metadataURL.Path = joinURLPath(metadataURL.Path, MetadataPath)
+	metadataURL.RawPath = ""
+	metadataURL.RawQuery = ""
+	metadataURL.Fragment = ""
+	return metadataURL.String()
+}
+
+func serveGatewayDiagnostics(w http.ResponseWriter, r *http.Request, diagnostics GatewayDiagnostics) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+		writeProcedureError(w, NewError(CodeMethodNotAllowed, "gateway diagnostics require GET"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(diagnostics)
 }
 
 func normalizeServicePrefix(prefix string) (string, error) {

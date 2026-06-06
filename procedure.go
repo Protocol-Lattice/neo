@@ -19,10 +19,14 @@ const (
 var jsonRawMessageType = reflect.TypeOf(json.RawMessage{})
 
 type ProcedureMeta struct {
-	Key    string        `json:"key"`
-	Kind   ProcedureKind `json:"kind"`
-	Input  string        `json:"input"`
-	Output string        `json:"output"`
+	Key         string        `json:"key"`
+	Kind        ProcedureKind `json:"kind"`
+	Input       string        `json:"input"`
+	Output      string        `json:"output"`
+	Summary     string        `json:"summary,omitempty"`
+	Description string        `json:"description,omitempty"`
+	Tags        []string      `json:"tags,omitempty"`
+	Deprecated  bool          `json:"deprecated,omitempty"`
 }
 
 type Procedure[Fn, In, Out any] struct {
@@ -39,23 +43,74 @@ type SubscriptionProcedure[Fn, In, Out any] struct {
 	Call func(ctx context.Context, fn Fn, args In) (<-chan Out, error)
 }
 
-func Query[In, Out any](fn func(context.Context, In) (Out, error)) *Procedure[any, any, any] {
-	return typedProcedure(ProcedureKindQuery, fn)
+// ProcedureOption customizes metadata for generated clients, docs, and schema
+// exports without changing procedure execution.
+type ProcedureOption func(*ProcedureMeta)
+
+// Validator is implemented by input types that can validate themselves after
+// JSON decoding and before the handler runs.
+type Validator interface {
+	Validate() error
 }
 
-func Mutation[In, Out any](fn func(context.Context, In) (Out, error)) *Procedure[any, any, any] {
-	return typedProcedure(ProcedureKindMutation, fn)
+// WithSummary sets a short one-line procedure summary.
+func WithSummary(summary string) ProcedureOption {
+	return func(meta *ProcedureMeta) {
+		meta.Summary = summary
+	}
 }
 
-func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error)) *SubscriptionProcedure[any, any, any] {
+// WithDescription sets longer procedure documentation.
+func WithDescription(description string) ProcedureOption {
+	return func(meta *ProcedureMeta) {
+		meta.Description = description
+	}
+}
+
+// WithTags adds procedure tags used by generated docs and schema exports.
+func WithTags(tags ...string) ProcedureOption {
+	return func(meta *ProcedureMeta) {
+		meta.Tags = append(meta.Tags, tags...)
+	}
+}
+
+// WithDeprecated marks a procedure as deprecated in metadata.
+func WithDeprecated() ProcedureOption {
+	return func(meta *ProcedureMeta) {
+		meta.Deprecated = true
+	}
+}
+
+// WithProcedureMeta overlays metadata fields on a procedure. The registered key
+// is still set by Router.Register or Router.RegisterSubscription; non-empty
+// Kind, Input, Output, Summary, Description, Tags, and Deprecated fields here
+// override or extend inferred metadata.
+func WithProcedureMeta(meta ProcedureMeta) ProcedureOption {
+	return func(target *ProcedureMeta) {
+		mergeProcedureMeta(target, meta)
+	}
+}
+
+func Query[In, Out any](fn func(context.Context, In) (Out, error), opts ...ProcedureOption) *Procedure[any, any, any] {
+	return typedProcedure(ProcedureKindQuery, fn, opts...)
+}
+
+func Mutation[In, Out any](fn func(context.Context, In) (Out, error), opts ...ProcedureOption) *Procedure[any, any, any] {
+	return typedProcedure(ProcedureKindMutation, fn, opts...)
+}
+
+func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error), opts ...ProcedureOption) *SubscriptionProcedure[any, any, any] {
+	meta := ProcedureMeta{
+		Kind:   ProcedureKindSubscription,
+		Input:  typeName[In](),
+		Output: typeName[Out](),
+	}
+	applyProcedureOptions(&meta, opts)
+
 	return &SubscriptionProcedure[any, any, any]{
 		Fn:   fn,
 		Kind: ProcedureKindSubscription,
-		Meta: ProcedureMeta{
-			Kind:   ProcedureKindSubscription,
-			Input:  typeName[In](),
-			Output: typeName[Out](),
-		},
+		Meta: meta,
 		Call: func(ctx context.Context, rawFn any, input any) (<-chan any, error) {
 			ctx = ensureContext(ctx)
 
@@ -66,7 +121,10 @@ func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error))
 
 			decoded, err := decodeInput[In](input)
 			if err != nil {
-				return nil, err
+				return nil, WrapError(CodeBadRequest, "invalid input", err)
+			}
+			if err := validateInput(decoded); err != nil {
+				return nil, WrapError(CodeBadRequest, "invalid input", err)
 			}
 
 			stream, err := call(ctx, decoded)
@@ -81,15 +139,18 @@ func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error))
 	}
 }
 
-func typedProcedure[In, Out any](kind ProcedureKind, fn func(context.Context, In) (Out, error)) *Procedure[any, any, any] {
+func typedProcedure[In, Out any](kind ProcedureKind, fn func(context.Context, In) (Out, error), opts ...ProcedureOption) *Procedure[any, any, any] {
+	meta := ProcedureMeta{
+		Kind:   kind,
+		Input:  typeName[In](),
+		Output: typeName[Out](),
+	}
+	applyProcedureOptions(&meta, opts)
+
 	return &Procedure[any, any, any]{
 		Fn:   fn,
 		Kind: kind,
-		Meta: ProcedureMeta{
-			Kind:   kind,
-			Input:  typeName[In](),
-			Output: typeName[Out](),
-		},
+		Meta: meta,
 		Call: func(ctx context.Context, rawFn any, input any) (any, error) {
 			ctx = ensureContext(ctx)
 
@@ -100,12 +161,60 @@ func typedProcedure[In, Out any](kind ProcedureKind, fn func(context.Context, In
 
 			decoded, err := decodeInput[In](input)
 			if err != nil {
-				return nil, err
+				return nil, WrapError(CodeBadRequest, "invalid input", err)
+			}
+			if err := validateInput(decoded); err != nil {
+				return nil, WrapError(CodeBadRequest, "invalid input", err)
 			}
 
 			return call(ctx, decoded)
 		},
 	}
+}
+
+func applyProcedureOptions(meta *ProcedureMeta, opts []ProcedureOption) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(meta)
+		}
+	}
+}
+
+func mergeProcedureMeta(target *ProcedureMeta, source ProcedureMeta) {
+	if source.Key != "" {
+		target.Key = source.Key
+	}
+	if source.Kind != "" {
+		target.Kind = source.Kind
+	}
+	if source.Input != "" {
+		target.Input = source.Input
+	}
+	if source.Output != "" {
+		target.Output = source.Output
+	}
+	if source.Summary != "" {
+		target.Summary = source.Summary
+	}
+	if source.Description != "" {
+		target.Description = source.Description
+	}
+	if len(source.Tags) > 0 {
+		target.Tags = append(target.Tags, source.Tags...)
+	}
+	if source.Deprecated {
+		target.Deprecated = true
+	}
+}
+
+func validateInput[T any](input T) error {
+	if validator, ok := any(input).(Validator); ok {
+		return validator.Validate()
+	}
+	if validator, ok := any(&input).(Validator); ok {
+		return validator.Validate()
+	}
+	return nil
 }
 
 func decodeInput[T any](input any) (T, error) {
