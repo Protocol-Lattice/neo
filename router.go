@@ -283,9 +283,20 @@ func (router *Router) ListenAndServe(opts ServerOptions) error {
 func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 	router.ensure()
 
-	prefix = "/" + strings.Trim(prefix, "/") + "/"
+	prefix = normalizeHTTPPrefix(prefix)
+	mux.Handle(prefix, router.HTTPHandler(prefix))
+}
 
-	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+// HTTPHandler returns an HTTP handler for this router mounted at prefix.
+//
+// It is useful when a Neo router is composed into a larger HTTP stack or a
+// microservice gateway without registering it directly on an http.ServeMux.
+func (router *Router) HTTPHandler(prefix string) http.Handler {
+	router.ensure()
+
+	prefix = normalizeHTTPPrefix(prefix)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeCORSHeaders(w, r, router.cors)
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Allow", "GET, HEAD, POST, OPTIONS")
@@ -532,6 +543,14 @@ func cloneMiddlewares(middlewares []Middleware) []Middleware {
 
 func appendMiddlewares(first []Middleware, second []Middleware) []Middleware {
 	return slices.Concat(first, second)
+}
+
+func normalizeHTTPPrefix(prefix string) string {
+	prefix = "/" + strings.Trim(prefix, "/") + "/"
+	if prefix == "//" {
+		return "/"
+	}
+	return prefix
 }
 
 func (router *Router) ensure() {

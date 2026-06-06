@@ -91,10 +91,16 @@ func scanPackage(dir string) (packageScan, error) {
 				return true
 			}
 
-			if parent, prefix, child, ok := nestedCall(call); ok {
+			if parent, prefix, child, ok := routerPrefixCall(call); ok {
 				nested = append(nested, nestedRouter{Parent: parent, Prefix: prefix, Child: child})
 				seenReceivers[parent] = struct{}{}
 				seenReceivers[child] = struct{}{}
+				return true
+			}
+
+			if receiver, proxied, ok := gatewayProxyCall(call); ok {
+				seenReceivers[receiver] = struct{}{}
+				procedures = append(procedures, proxied...)
 				return true
 			}
 
@@ -204,9 +210,9 @@ func registerCall(call *ast.CallExpr) (receiver, key, kind, input, output string
 	return receiver, key, kind, input, output, true
 }
 
-func nestedCall(call *ast.CallExpr) (parent, prefix, child string, ok bool) {
+func routerPrefixCall(call *ast.CallExpr) (parent, prefix, child string, ok bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Nested" || len(call.Args) < 2 {
+	if !ok || (sel.Sel.Name != "Nested" && sel.Sel.Name != "Mount") || len(call.Args) < 2 {
 		return "", "", "", false
 	}
 
@@ -226,6 +232,132 @@ func nestedCall(call *ast.CallExpr) (parent, prefix, child string, ok bool) {
 	}
 
 	return parent, prefix, childIdent.Name, true
+}
+
+func nestedCall(call *ast.CallExpr) (parent, prefix, child string, ok bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Nested" {
+		return "", "", "", false
+	}
+	return routerPrefixCall(call)
+}
+
+func gatewayProxyCall(call *ast.CallExpr) (receiver string, procedures []procedure, ok bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Proxy" || len(call.Args) < 3 {
+		return "", nil, false
+	}
+
+	receiver, ok = selectorReceiverName(sel.X)
+	if !ok {
+		return "", nil, false
+	}
+
+	prefix, ok := stringLiteral(call.Args[0])
+	if !ok || prefix == "" {
+		return "", nil, false
+	}
+
+	for _, arg := range call.Args[2:] {
+		procedures = append(procedures, proxyMetadataProcedures(receiver, prefix, arg)...)
+	}
+	if len(procedures) == 0 {
+		return "", nil, false
+	}
+
+	return receiver, procedures, true
+}
+
+func proxyMetadataProcedures(receiver string, prefix string, expr ast.Expr) []procedure {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return nil
+	}
+
+	name, ok := selectorName(call.Fun)
+	if !ok || name != "WithProxyMetadata" {
+		return nil
+	}
+
+	var procedures []procedure
+	for _, arg := range call.Args {
+		if p, ok := procedureMeta(receiver, prefix, arg); ok {
+			procedures = append(procedures, p)
+		}
+	}
+	return procedures
+}
+
+func procedureMeta(receiver string, prefix string, expr ast.Expr) (procedure, bool) {
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return procedure{}, false
+	}
+
+	typeName, ok := selectorName(lit.Type)
+	if !ok || typeName != "ProcedureMeta" {
+		return procedure{}, false
+	}
+
+	var p procedure
+	p.Receiver = receiver
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+
+		switch key.Name {
+		case "Key":
+			p.Key, _ = stringLiteral(kv.Value)
+		case "Kind":
+			p.Kind, _ = procedureKind(kv.Value)
+		case "Input":
+			p.Input, _ = stringLiteral(kv.Value)
+		case "Output":
+			p.Output, _ = stringLiteral(kv.Value)
+		}
+	}
+
+	if p.Key == "" || p.Input == "" || p.Output == "" {
+		return procedure{}, false
+	}
+	if p.Kind == "" {
+		p.Kind = "query"
+	}
+	p.Key = fullProcedureKey(prefix, p.Key)
+	return p, true
+}
+
+func procedureKind(expr ast.Expr) (string, bool) {
+	if value, ok := stringLiteral(expr); ok {
+		switch value {
+		case "query", "mutation", "subscription":
+			return value, true
+		default:
+			return "", false
+		}
+	}
+
+	name, ok := selectorName(expr)
+	if !ok {
+		return "", false
+	}
+
+	switch name {
+	case "ProcedureKindQuery":
+		return "query", true
+	case "ProcedureKindMutation":
+		return "mutation", true
+	case "ProcedureKindSubscription":
+		return "subscription", true
+	default:
+		return "", false
+	}
 }
 
 func inferPrefixes(receivers map[string]struct{}, nested []nestedRouter) (map[string]string, error) {

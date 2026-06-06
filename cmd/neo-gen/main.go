@@ -36,7 +36,7 @@ func runNeoGen(args []string, stdout io.Writer, stderr io.Writer) error {
 	}
 	if len(scan.Procedures) == 0 {
 		return fmt.Errorf(
-			"no typed procedures found in %s; expected neo.Query[In, Out](...), neo.Mutation[In, Out](...), or neo.Subscription[In, Out](...) inside Register/RegisterSubscription",
+			"no typed procedures found in %s; expected typed Register/RegisterSubscription calls or Gateway.Proxy calls with neo.WithProxyMetadata",
 			cfg.dir,
 		)
 	}
