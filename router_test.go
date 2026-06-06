@@ -181,6 +181,66 @@ func TestMetadataReturnsStableKeyOrder(t *testing.T) {
 	}
 }
 
+func TestMetadataEndpointReturnsProcedureMetadata(t *testing.T) {
+	router := NewRouter()
+	router.Register("zeta", Query(func(context.Context, struct{}) (string, error) { return "", nil }))
+	router.Register("alpha", Mutation(func(context.Context, testInput) (testOutput, error) {
+		return testOutput{}, nil
+	}))
+	router.RegisterSubscription("events", Subscription(func(context.Context, struct{}) (<-chan string, error) {
+		ch := make(chan string)
+		close(ch)
+		return ch, nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/neo/"+MetadataPath, nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var metadata []ProcedureMeta
+	if err := json.Unmarshal(rec.Body.Bytes(), &metadata); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	if len(metadata) != 3 {
+		t.Fatalf("metadata len = %d, want 3", len(metadata))
+	}
+
+	got := []string{metadata[0].Key, metadata[1].Key, metadata[2].Key}
+	want := []string{"alpha", "events", "zeta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("metadata keys = %#v, want %#v", got, want)
+	}
+	if metadata[0].Kind != ProcedureKindMutation {
+		t.Fatalf("alpha kind = %q, want mutation", metadata[0].Kind)
+	}
+}
+
+func TestMetadataEndpointRejectsUnsupportedMethods(t *testing.T) {
+	router := NewRouter()
+	router.Register("ping", Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/neo/"+MetadataPath, nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Allow"); got != "GET, HEAD, OPTIONS" {
+		t.Fatalf("allow = %q, want GET, HEAD, OPTIONS", got)
+	}
+}
+
 func TestNilRegistrationRemovesMetadata(t *testing.T) {
 	router := NewRouter()
 	router.Register("ping", Query(func(context.Context, struct{}) (string, error) {

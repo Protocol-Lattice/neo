@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -98,6 +101,60 @@ func register(gateway Gateway, users Router, ordersURL string) {
 	}
 }
 
+func TestScanDirFindsProcedureMetadataOptions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.go", `package example
+
+type Input struct{}
+type Output struct{}
+
+func register(root Router) {
+	root.Register("user.get", neo.Query[Input, Output](
+		nil,
+		neo.WithSummary("Get user"),
+		neo.WithDescription("Returns a user by ID."),
+		neo.WithTags("users", "read"),
+		neo.WithDeprecated(),
+	))
+	root.Register("user.create", neo.Mutation[Input, Output](
+		nil,
+		neo.WithProcedureMeta(neo.ProcedureMeta{
+			Summary: "Create user",
+			Tags: []string{"users", "write"},
+		}),
+	))
+}
+`)
+
+	scan, err := scanPackage(dir)
+	if err != nil {
+		t.Fatalf("scanPackage returned error: %v", err)
+	}
+	if len(scan.Procedures) != 2 {
+		t.Fatalf("procedures len = %d, want 2", len(scan.Procedures))
+	}
+
+	var get procedure
+	for _, procedure := range scan.Procedures {
+		if procedure.Key == "user.get" {
+			get = procedure
+			break
+		}
+	}
+	if get.Key != "user.get" {
+		t.Fatalf("procedure key = %q, want user.get", get.Key)
+	}
+	if get.Summary != "Get user" || get.Description != "Returns a user by ID." {
+		t.Fatalf("procedure metadata = %#v", get)
+	}
+	if strings.Join(get.Tags, ",") != "users,read" {
+		t.Fatalf("tags = %#v", get.Tags)
+	}
+	if !get.Deprecated {
+		t.Fatal("deprecated = false, want true")
+	}
+}
+
 func TestScanDirReturnsHelpfulErrors(t *testing.T) {
 	t.Run("missing package", func(t *testing.T) {
 		dir := t.TempDir()
@@ -150,6 +207,48 @@ func register(root Router) {
 	assertContains(t, text, "package example")
 	assertContains(t, text, "type TypedClient struct {")
 	assertContains(t, text, "func (p HelloProcedure) Query(ctx context.Context, input Input) (Output, error)")
+	assertContains(t, stdout.String(), "neo-gen: generated 1 typed procedures in "+out)
+}
+
+func TestRunNeoGenWritesGeneratedFileFromMetadataURL(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "types.go", `package example
+
+type CreateInput struct{ Name string }
+type User struct{ Name string }
+`)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/neo/_meta" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]remoteProcedureMeta{
+			{Key: "user.create", Kind: "mutation", Input: "CreateInput", Output: "User"},
+		})
+	}))
+	defer server.Close()
+
+	out := filepath.Join(t.TempDir(), "neo.gen.go")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := runNeoGen([]string{"-dir", dir, "-metadata-url", server.URL + "/neo", "-out", out}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runNeoGen returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read generated file: %v", err)
+	}
+	text := string(raw)
+	assertContains(t, text, "package example")
+	assertContains(t, text, "func (p UserCreateProcedure) Mutate(ctx context.Context, input CreateInput) (User, error)")
+	assertContains(t, text, `neo.CallTyped[CreateInput, User](ctx, p.client.Mutation.Procedure("user.create"), input)`)
 	assertContains(t, stdout.String(), "neo-gen: generated 1 typed procedures in "+out)
 }
 
@@ -412,6 +511,7 @@ func TestGenerateProducesTypedClientForGroupedRootAndSubscriptionProcedures(t *t
 	assertContains(t, text, "tc.Events.Updates = EventsUpdatesProcedure{client: c}")
 	assertContains(t, text, "func NewTypedClient(addr string, opts ...neo.ClientOption) *TypedClient")
 	assertContains(t, text, "func NewTypedClientFromClient(c *neo.Client) *TypedClient")
+	assertContains(t, text, "func (tc *TypedClient) Metadata(ctx context.Context) ([]neo.ProcedureMeta, error)")
 	assertContains(t, text, "func (p HealthProcedure) Query(ctx context.Context, input struct{}) (string, error)")
 	assertContains(t, text, "func (p HealthProcedure) Call(ctx context.Context, input struct{}) (string, error)")
 	assertContains(t, text, `neo.CallTyped[struct{}, string](ctx, p.client.Query.Procedure("health"), input)`)
@@ -489,6 +589,41 @@ func register(root, user Router) {
 	assertContains(t, text, `return this.client.subscribeWebSocket<NoInput, User>("user.changes", input, options);`)
 }
 
+func TestGenerateDocsAndSchemaUseProcedureMetadata(t *testing.T) {
+	procedures := []procedure{
+		{
+			Key:         "user.get",
+			Kind:        "query",
+			Input:       "GetUserInput",
+			Output:      "User",
+			Summary:     "Get user",
+			Description: "Returns a user by ID.",
+			Tags:        []string{"users", "read"},
+			Deprecated:  true,
+		},
+	}
+
+	docs, err := generateDocs(procedures)
+	if err != nil {
+		t.Fatalf("generateDocs returned error: %v", err)
+	}
+	docText := string(docs)
+	assertContains(t, docText, "# Neo API")
+	assertContains(t, docText, "## `user.get`")
+	assertContains(t, docText, "Get user")
+	assertContains(t, docText, "> Deprecated.")
+	assertContains(t, docText, "- Tags: `users`, `read`")
+
+	schema, err := generateSchema(procedures)
+	if err != nil {
+		t.Fatalf("generateSchema returned error: %v", err)
+	}
+	schemaText := string(schema)
+	assertContains(t, schemaText, `"schema": "https://protocol-lattice.github.io/neo/schema/v1"`)
+	assertContains(t, schemaText, `"key": "user.get"`)
+	assertContains(t, schemaText, `"deprecated": true`)
+}
+
 func TestGenerateTypeScriptHandlesExternalTypesAndNameCollisions(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "routes.go", `package example
@@ -533,6 +668,25 @@ func register(root Router) {
 	assertContains(t, text, `return this.client.request<ExternalInput, DomainPage<ApiUser>>("GET", "user.get_id", input, options);`)
 }
 
+func TestGenerateTypeScriptDeclaresMetadataOnlyTypes(t *testing.T) {
+	procedures := []procedure{
+		{Key: "user.list", Kind: "query", Input: "ListInput", Output: "Page[User]"},
+	}
+
+	src, err := generateTypeScript(procedures, nil, typeScriptOptions{
+		RuntimeImport: "./neo.runtime.ts",
+	})
+	if err != nil {
+		t.Fatalf("generateTypeScript returned error: %v", err)
+	}
+	text := string(src)
+
+	assertContains(t, text, "export type ListInput = unknown;")
+	assertContains(t, text, "export type Page<T1 = unknown> = unknown;")
+	assertContains(t, text, "export type User = unknown;")
+	assertContains(t, text, `return this.client.request<ListInput, Page<User>>("GET", "user.list", input, options);`)
+}
+
 func TestExamplesTypeScriptClientGeneratedFilesAreCurrent(t *testing.T) {
 	exampleDir := filepath.Clean("../../examples/ts_client")
 
@@ -545,6 +699,8 @@ func TestExamplesTypeScriptClientGeneratedFilesAreCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateTypeScriptRuntime returned error: %v", err)
 	}
+	assertContains(t, string(runtime), "async metadata(options: NeoCallOptions = {}): Promise<NeoProcedureMeta[]>")
+	assertContains(t, string(runtime), "export type NeoProcedureMeta = {")
 	assertFileContent(t, filepath.Join(exampleDir, "neo.runtime.ts"), string(runtime))
 
 	client, err := generateTypeScript(scan.Procedures, scan.Types, typeScriptOptions{

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type commandConfig struct {
@@ -15,6 +19,7 @@ type commandConfig struct {
 	packageOverride string
 	target          string
 	tsRuntimeImport string
+	metadataURL     string
 }
 
 func main() {
@@ -30,7 +35,7 @@ func runNeoGen(args []string, stdout io.Writer, stderr io.Writer) error {
 		return err
 	}
 
-	scan, err := scanPackage(cfg.dir)
+	scan, err := loadPackageScan(cfg)
 	if err != nil {
 		return err
 	}
@@ -77,14 +82,117 @@ func parseCommandConfig(args []string, stderr io.Writer) (commandConfig, error) 
 	flags.StringVar(&cfg.dir, "dir", ".", "directory containing procedure registrations")
 	flags.StringVar(&cfg.out, "out", "neo.gen.go", "output file")
 	flags.StringVar(&cfg.packageOverride, "package", "", "optional generated package name")
-	flags.StringVar(&cfg.target, "target", "go", "generation target: go, ts, ts-runtime, or ts-standalone")
+	flags.StringVar(&cfg.target, "target", "go", "generation target: go, ts, ts-runtime, ts-standalone, docs, or schema")
 	flags.StringVar(&cfg.tsRuntimeImport, "ts-runtime-import", "./neo.runtime.ts", "runtime import path for generated TypeScript clients")
+	flags.StringVar(&cfg.metadataURL, "metadata-url", "", "optional Neo metadata endpoint or base URL to generate from")
 
 	if err := flags.Parse(args); err != nil {
 		return commandConfig{}, err
 	}
 
 	return cfg, nil
+}
+
+func loadPackageScan(cfg commandConfig) (packageScan, error) {
+	if cfg.metadataURL == "" {
+		return scanPackage(cfg.dir)
+	}
+
+	metadata, err := fetchMetadataURL(cfg.metadataURL)
+	if err != nil {
+		return packageScan{}, err
+	}
+
+	scan, err := scanOptionalPackage(cfg.dir)
+	if err != nil {
+		return packageScan{}, err
+	}
+	scan.Procedures = metadataProcedures(metadata)
+	return scan, nil
+}
+
+func scanOptionalPackage(dir string) (packageScan, error) {
+	scan, err := scanPackage(dir)
+	if err == nil {
+		return scan, nil
+	}
+	if strings.Contains(err.Error(), "no go package found") {
+		return packageScan{}, nil
+	}
+	return packageScan{}, err
+}
+
+type remoteProcedureMeta struct {
+	Key         string   `json:"key"`
+	Kind        string   `json:"kind"`
+	Input       string   `json:"input"`
+	Output      string   `json:"output"`
+	Summary     string   `json:"summary,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Deprecated  bool     `json:"deprecated,omitempty"`
+}
+
+func fetchMetadataURL(rawURL string) ([]remoteProcedureMeta, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataEndpointURL(rawURL), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create metadata request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch metadata: %w", err)
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if res.StatusCode >= 400 {
+		return nil, fmt.Errorf("fetch metadata: status %d", res.StatusCode)
+	}
+
+	var metadata []remoteProcedureMeta
+	if err := json.NewDecoder(res.Body).Decode(&metadata); err != nil {
+		return nil, fmt.Errorf("decode metadata: %w", err)
+	}
+
+	return metadata, nil
+}
+
+func metadataEndpointURL(rawURL string) string {
+	rawURL = strings.TrimRight(rawURL, "/")
+	if strings.HasSuffix(rawURL, "/_meta") {
+		return rawURL
+	}
+	return rawURL + "/_meta"
+}
+
+func metadataProcedures(metadata []remoteProcedureMeta) []procedure {
+	procedures := make([]procedure, 0, len(metadata))
+	for _, meta := range metadata {
+		p := procedure{
+			Key:         strings.Trim(meta.Key, "."),
+			Kind:        meta.Kind,
+			Input:       meta.Input,
+			Output:      meta.Output,
+			Summary:     meta.Summary,
+			Description: meta.Description,
+			Tags:        meta.Tags,
+			Deprecated:  meta.Deprecated,
+		}
+		if p.Kind == "" {
+			p.Kind = "query"
+		}
+		if p.Key == "" || p.Input == "" || p.Output == "" {
+			continue
+		}
+		procedures = append(procedures, p)
+	}
+	return procedures
 }
 
 func generateTarget(scan packageScan, pkg string, cfg commandConfig) ([]byte, error) {
@@ -120,7 +228,19 @@ func generateTarget(scan packageScan, pkg string, cfg commandConfig) ([]byte, er
 			return src, fmt.Errorf("generate: %w", err)
 		}
 		return src, nil
+	case "docs", "markdown", "md":
+		src, err := generateDocs(scan.Procedures)
+		if err != nil {
+			return src, fmt.Errorf("generate: %w", err)
+		}
+		return src, nil
+	case "schema", "json-schema":
+		src, err := generateSchema(scan.Procedures)
+		if err != nil {
+			return src, fmt.Errorf("generate: %w", err)
+		}
+		return src, nil
 	default:
-		return nil, fmt.Errorf("unsupported target %q; expected go, ts, ts-runtime, or ts-standalone", cfg.target)
+		return nil, fmt.Errorf("unsupported target %q; expected go, ts, ts-runtime, ts-standalone, docs, or schema", cfg.target)
 	}
 }

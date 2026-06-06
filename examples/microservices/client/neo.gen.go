@@ -29,6 +29,10 @@ func NewTypedClientFromClient(c *neo.Client) *TypedClient {
 	return tc
 }
 
+func (tc *TypedClient) Metadata(ctx context.Context) ([]neo.ProcedureMeta, error) {
+	return tc.client.Metadata(ctx)
+}
+
 type OrdersClient struct {
 	client *neo.Client
 	Create OrdersCreateProcedure

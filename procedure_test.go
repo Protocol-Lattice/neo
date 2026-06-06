@@ -2,6 +2,7 @@ package neo
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,17 @@ type procedureInput struct {
 
 type procedureOutput struct {
 	Message string `json:"message"`
+}
+
+type validatedProcedureInput struct {
+	Name string `json:"name"`
+}
+
+func (input validatedProcedureInput) Validate() error {
+	if input.Name == "" {
+		return errors.New("name is required")
+	}
+	return nil
 }
 
 func TestQueryDecodesMapInputAndReturnsTypedOutput(t *testing.T) {
@@ -34,6 +46,46 @@ func TestQueryDecodesMapInputAndReturnsTypedOutput(t *testing.T) {
 	}
 	if procedure.Kind != ProcedureKindQuery || procedure.Meta.Kind != ProcedureKindQuery {
 		t.Fatalf("unexpected query metadata: %#v", procedure.Meta)
+	}
+}
+
+func TestProcedureOptionsPopulateMetadata(t *testing.T) {
+	procedure := Query[procedureInput, procedureOutput](
+		func(ctx context.Context, input procedureInput) (procedureOutput, error) {
+			return procedureOutput{}, nil
+		},
+		WithSummary("Get a greeting"),
+		WithDescription("Returns a greeting for a name."),
+		WithTags("greeting", "example"),
+		WithDeprecated(),
+	)
+
+	if procedure.Meta.Summary != "Get a greeting" {
+		t.Fatalf("summary = %q, want Get a greeting", procedure.Meta.Summary)
+	}
+	if procedure.Meta.Description != "Returns a greeting for a name." {
+		t.Fatalf("description = %q", procedure.Meta.Description)
+	}
+	if strings.Join(procedure.Meta.Tags, ",") != "greeting,example" {
+		t.Fatalf("tags = %#v", procedure.Meta.Tags)
+	}
+	if !procedure.Meta.Deprecated {
+		t.Fatal("deprecated = false, want true")
+	}
+}
+
+func TestProcedureValidatesDecodedInput(t *testing.T) {
+	procedure := Mutation[validatedProcedureInput, procedureOutput](func(ctx context.Context, input validatedProcedureInput) (procedureOutput, error) {
+		return procedureOutput{Message: input.Name}, nil
+	})
+
+	_, err := procedure.Call(context.Background(), procedure.Fn, map[string]any{"name": ""})
+	var neoErr *Error
+	if !errors.As(err, &neoErr) {
+		t.Fatalf("error = %v, want *Error", err)
+	}
+	if neoErr.Code != CodeBadRequest || !strings.Contains(neoErr.Unwrap().Error(), "name is required") {
+		t.Fatalf("error = %#v, cause=%v; want bad request validation error", neoErr, neoErr.Unwrap())
 	}
 }
 

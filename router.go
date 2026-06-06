@@ -310,6 +310,11 @@ func (router *Router) HTTPHandler(prefix string) http.Handler {
 		}
 		key = strings.Trim(key, "/")
 
+		if key == MetadataPath {
+			serveProcedureMetadata(w, r, router.Metadata())
+			return
+		}
+
 		if subscription := router.subscriptions[key]; subscription != nil {
 			router.serveSubscription(w, r, key, subscription)
 			return
