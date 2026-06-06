@@ -42,7 +42,7 @@ func readInput(r *http.Request) (any, error) {
 
 		var req Request
 		if err := decodeSingleJSON(r.Body, &req); err != nil {
-			return nil, errors.New("invalid JSON body")
+			return nil, errors.New("invalid json body")
 		}
 
 		return req.Input, nil
@@ -61,7 +61,7 @@ func decodeSingleJSON(r io.Reader, value any) error {
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return errors.New("multiple JSON values")
+			return errors.New("multiple json values")
 		}
 		return err
 	}

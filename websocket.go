@@ -118,14 +118,13 @@ func (client *Client) subscriptionURL(key string, input any) (string, error) {
 }
 
 func httpToWebSocketURL(raw string) string {
-	switch {
-	case strings.HasPrefix(raw, "https://"):
-		return "wss://" + strings.TrimPrefix(raw, "https://")
-	case strings.HasPrefix(raw, "http://"):
-		return "ws://" + strings.TrimPrefix(raw, "http://")
-	default:
-		return raw
+	if rest, ok := strings.CutPrefix(raw, "https://"); ok {
+		return "wss://" + rest
 	}
+	if rest, ok := strings.CutPrefix(raw, "http://"); ok {
+		return "ws://" + rest
+	}
+	return raw
 }
 
 func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Conn, *bufio.Reader, error) {
@@ -140,11 +139,7 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 	host := parsed.Host
 	addr := host
 	if !strings.Contains(addr, ":") {
-		if parsed.Scheme == "wss" {
-			addr += ":443"
-		} else {
-			addr += ":80"
-		}
+		addr += defaultWebSocketPort(parsed.Scheme)
 	}
 
 	var dialer net.Dialer
@@ -224,6 +219,13 @@ func (client *Client) dialWebSocket(ctx context.Context, rawURL string) (net.Con
 	return conn, reader, nil
 }
 
+func defaultWebSocketPort(scheme string) string {
+	if scheme == "wss" {
+		return ":443"
+	}
+	return ":80"
+}
+
 type webSocketUpgradeResponse struct {
 	statusCode int
 	header     map[string][]string
@@ -242,12 +244,12 @@ func readWebSocketUpgradeResponse(reader *bufio.Reader) (webSocketUpgradeRespons
 		return webSocketUpgradeResponse{}, fmt.Errorf("read websocket upgrade status: %w", err)
 	}
 	if !strings.HasPrefix(statusLine, "HTTP/1.") {
-		return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has invalid HTTP status line")
+		return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has invalid http status line")
 	}
 
 	parts := strings.SplitN(statusLine, " ", 3)
 	if len(parts) < 2 {
-		return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has malformed HTTP status line")
+		return webSocketUpgradeResponse{}, errors.New("websocket upgrade response has malformed http status line")
 	}
 	statusCode, err := parseHTTPStatusCode(parts[1])
 	if err != nil {
@@ -298,7 +300,7 @@ func readLimitedHTTPLine(reader *bufio.Reader, limit int) (string, int, error) {
 		fragment, err := reader.ReadSlice('\n')
 		line = append(line, fragment...)
 		if len(line) > limit {
-			return "", len(line), errors.New("HTTP line too long")
+			return "", len(line), errors.New("http line too long")
 		}
 		if err == nil {
 			break
@@ -308,19 +310,19 @@ func readLimitedHTTPLine(reader *bufio.Reader, limit int) (string, int, error) {
 		}
 	}
 	if !bytes.HasSuffix(line, []byte("\r\n")) {
-		return "", len(line), errors.New("HTTP line missing CRLF terminator")
+		return "", len(line), errors.New("http line missing crlf terminator")
 	}
 	return string(bytes.TrimSuffix(line, []byte("\r\n"))), len(line), nil
 }
 
 func parseHTTPStatusCode(value string) (int, error) {
 	if len(value) != 3 {
-		return 0, errors.New("websocket upgrade response has invalid HTTP status code")
+		return 0, errors.New("websocket upgrade response has invalid http status code")
 	}
 	code := 0
 	for _, ch := range value {
 		if ch < '0' || ch > '9' {
-			return 0, errors.New("websocket upgrade response has invalid HTTP status code")
+			return 0, errors.New("websocket upgrade response has invalid http status code")
 		}
 		code = code*10 + int(ch-'0')
 	}
@@ -385,12 +387,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request, stream <-chan any) {
 	}()
 
 	accept := webSocketAccept(r.Header.Get("Sec-WebSocket-Key"))
-	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\n")
-	_, _ = fmt.Fprintf(rw, "Upgrade: websocket\r\n")
-	_, _ = fmt.Fprintf(rw, "Connection: Upgrade\r\n")
-	_, _ = fmt.Fprintf(rw, "Sec-WebSocket-Accept: %s\r\n", accept)
-	_, _ = fmt.Fprintf(rw, "\r\n")
-	if err := rw.Flush(); err != nil {
+	if err := writeWebSocketUpgrade(rw, accept); err != nil {
 		return
 	}
 
@@ -417,6 +414,25 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request, stream <-chan any) {
 			}
 		}
 	}
+}
+
+func writeWebSocketUpgrade(rw *bufio.ReadWriter, accept string) error {
+	if _, err := rw.WriteString("HTTP/1.1 101 Switching Protocols\r\n"); err != nil {
+		return err
+	}
+	if _, err := rw.WriteString("Upgrade: websocket\r\n"); err != nil {
+		return err
+	}
+	if _, err := rw.WriteString("Connection: Upgrade\r\n"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(rw, "Sec-WebSocket-Accept: %s\r\n", accept); err != nil {
+		return err
+	}
+	if _, err := rw.WriteString("\r\n"); err != nil {
+		return err
+	}
+	return rw.Flush()
 }
 
 func newWebSocketKey() (string, error) {

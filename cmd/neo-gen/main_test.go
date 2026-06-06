@@ -62,8 +62,8 @@ func TestScanDirReturnsHelpfulErrors(t *testing.T) {
 	t.Run("missing package", func(t *testing.T) {
 		dir := t.TempDir()
 		_, _, err := scanDir(dir)
-		if err == nil || !strings.Contains(err.Error(), "no Go package found") {
-			t.Fatalf("error = %v, want no Go package found", err)
+		if err == nil || !strings.Contains(err.Error(), "no go package found") {
+			t.Fatalf("error = %v, want no go package found", err)
 		}
 	})
 

@@ -286,11 +286,11 @@ func (broker *Broker) connect(ctx context.Context) (net.Conn, *bufio.ReadWriter,
 	line, err := readNATSProtocolLine(rw.Reader, maxProtocolLineBytes)
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("read INFO: %w", err)
+		return nil, nil, fmt.Errorf("read info: %w", err)
 	}
 	if !strings.HasPrefix(line, "INFO ") {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("expected INFO, got %q", strings.TrimSpace(line))
+		return nil, nil, fmt.Errorf("expected info, got %q", strings.TrimSpace(line))
 	}
 
 	if _, err := rw.WriteString("CONNECT {\"verbose\":false,\"pedantic\":false,\"lang\":\"go\",\"version\":\"neo\"}\r\n"); err != nil {
@@ -309,19 +309,19 @@ func (broker *Broker) connect(ctx context.Context) (net.Conn, *bufio.ReadWriter,
 func readMSG(rw *bufio.ReadWriter, header string, maxBytes int) ([]byte, error) {
 	fields := strings.Fields(header)
 	if len(fields) != 4 && len(fields) != 5 {
-		return nil, fmt.Errorf("invalid MSG header %q", header)
+		return nil, fmt.Errorf("invalid msg header %q", header)
 	}
 
 	bytesField := fields[len(fields)-1]
 	n, err := strconv.Atoi(bytesField)
 	if err != nil || n < 0 {
-		return nil, fmt.Errorf("invalid MSG size %q", bytesField)
+		return nil, fmt.Errorf("invalid msg size %q", bytesField)
 	}
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxMessageBytes
 	}
 	if n > maxBytes {
-		return nil, fmt.Errorf("MSG size %d exceeds limit %d", n, maxBytes)
+		return nil, fmt.Errorf("msg size %d exceeds limit %d", n, maxBytes)
 	}
 
 	payload := make([]byte, n)
@@ -334,7 +334,7 @@ func readMSG(rw *bufio.ReadWriter, header string, maxBytes int) ([]byte, error) 
 		return nil, err
 	}
 	if string(terminator[:]) != "\r\n" {
-		return nil, fmt.Errorf("invalid MSG terminator %q", string(terminator[:]))
+		return nil, fmt.Errorf("invalid msg terminator %q", string(terminator[:]))
 	}
 
 	return payload, nil
@@ -362,7 +362,7 @@ func readNATSProtocolLine(reader *bufio.Reader, limit int) (string, error) {
 
 	raw := string(line)
 	if !strings.HasSuffix(raw, "\r\n") {
-		return "", errors.New("nats protocol line missing CRLF terminator")
+		return "", errors.New("nats protocol line missing crlf terminator")
 	}
 	return strings.TrimSuffix(raw, "\r\n"), nil
 }

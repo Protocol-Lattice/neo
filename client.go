@@ -134,38 +134,14 @@ func SubscribeTyped[In, Out any](ctx context.Context, procedure *ClientProcedure
 }
 
 func decodeClientStream[Out any](ctx context.Context, raw <-chan any) <-chan Out {
-	ctx = ensureContext(ctx)
-
-	out := make(chan Out)
-	if raw == nil {
-		close(out)
-		return out
-	}
-
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case value, ok := <-raw:
-				if !ok {
-					return
-				}
-				decoded, err := decodeClientValue[Out](value)
-				if err != nil {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case out <- decoded:
-				}
-			}
+	return mapStream(ctx, raw, func(value any) (Out, bool) {
+		decoded, err := decodeClientValue[Out](value)
+		if err != nil {
+			var zero Out
+			return zero, false
 		}
-	}()
-
-	return out
+		return decoded, true
+	})
 }
 
 func decodeClientValue[T any](value any) (T, error) {
@@ -221,6 +197,8 @@ func (client *Client) call(ctx context.Context, method string, key string, input
 }
 
 func (client *Client) subscribe(ctx context.Context, key string, input any) (<-chan any, error) {
+	ctx = ensureContext(ctx)
+
 	req, err := client.newRequest(ctx, http.MethodGet, key, input)
 	if err != nil {
 		return nil, err

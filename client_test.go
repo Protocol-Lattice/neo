@@ -179,6 +179,37 @@ func TestClientSubscribeReadsNDJSONStream(t *testing.T) {
 	}
 }
 
+func TestClientSubscribeAcceptsNilContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(Response{Result: testOutput{Message: "one"}})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	stream, err := client.Subscription.Procedure("events").Subscribe(nil, nil)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	select {
+	case value, ok := <-stream:
+		if !ok {
+			t.Fatal("stream closed before first value")
+		}
+		got, err := decodeClientValue[testOutput](value)
+		if err != nil {
+			t.Fatalf("decode stream value: %v", err)
+		}
+		if got.Message != "one" {
+			t.Fatalf("message = %q, want one", got.Message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stream value")
+	}
+}
+
 func TestDecodeClientStreamStopsOnDecodeError(t *testing.T) {
 	raw := make(chan any, 2)
 	raw <- map[string]any{"message": map[string]any{"nested": true}}

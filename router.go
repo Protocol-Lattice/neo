@@ -150,17 +150,20 @@ func (router *Router) Register(key string, procedure *Procedure[any, any, any]) 
 	router.procedures[key] = procedure
 	router.procedureMiddlewares[key] = cloneMiddlewares(router.middlewares)
 
-	if procedure != nil {
-		meta := procedure.Meta
-		meta.Key = key
-		if meta.Kind == "" {
-			meta.Kind = procedure.Kind
-		}
-		if meta.Kind == "" {
-			meta.Kind = ProcedureKindQuery
-		}
-		router.metadata[key] = meta
+	if procedure == nil {
+		delete(router.metadata, key)
+		return
 	}
+
+	meta := procedure.Meta
+	meta.Key = key
+	if meta.Kind == "" {
+		meta.Kind = procedure.Kind
+	}
+	if meta.Kind == "" {
+		meta.Kind = ProcedureKindQuery
+	}
+	router.metadata[key] = meta
 }
 
 func (router *Router) RegisterSubscription(key string, procedure *SubscriptionProcedure[any, any, any]) {
@@ -169,14 +172,17 @@ func (router *Router) RegisterSubscription(key string, procedure *SubscriptionPr
 	router.subscriptions[key] = procedure
 	router.subscriptionMiddlewares[key] = cloneMiddlewares(router.middlewares)
 
-	if procedure != nil {
-		meta := procedure.Meta
-		meta.Key = key
-		if meta.Kind == "" {
-			meta.Kind = ProcedureKindSubscription
-		}
-		router.metadata[key] = meta
+	if procedure == nil {
+		delete(router.metadata, key)
+		return
 	}
+
+	meta := procedure.Meta
+	meta.Key = key
+	if meta.Kind == "" {
+		meta.Kind = ProcedureKindSubscription
+	}
+	router.metadata[key] = meta
 }
 
 func (router *Router) Method(key string) *Procedure[any, any, any] {
@@ -456,8 +462,10 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request, opts CORSOptions) 
 
 	w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 	w.Header().Set("Vary", "Origin")
-	w.Header().Set("Access-Control-Allow-Methods", strings.Join(corsValues(opts.AllowedMethods, []string{"GET", "HEAD", "POST", "OPTIONS"}), ", "))
-	w.Header().Set("Access-Control-Allow-Headers", strings.Join(corsValues(opts.AllowedHeaders, []string{"Content-Type", "Authorization", "Accept"}), ", "))
+	allowedMethods := corsValues(opts.AllowedMethods, []string{"GET", "HEAD", "POST", "OPTIONS"})
+	allowedHeaders := corsValues(opts.AllowedHeaders, []string{"Content-Type", "Authorization", "Accept"})
+	w.Header().Set("Access-Control-Allow-Methods", strings.Join(allowedMethods, ", "))
+	w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 	if opts.AllowCredentials {
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 	}
@@ -492,14 +500,11 @@ func corsValues(values []string, defaults []string) []string {
 }
 
 func cloneMiddlewares(middlewares []Middleware) []Middleware {
-	return append([]Middleware(nil), middlewares...)
+	return slices.Clone(middlewares)
 }
 
 func appendMiddlewares(first []Middleware, second []Middleware) []Middleware {
-	out := make([]Middleware, 0, len(first)+len(second))
-	out = append(out, first...)
-	out = append(out, second...)
-	return out
+	return slices.Concat(first, second)
 }
 
 func (router *Router) ensure() {

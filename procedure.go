@@ -3,6 +3,7 @@ package neo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 )
@@ -58,7 +59,7 @@ func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error))
 
 			call, ok := rawFn.(func(context.Context, In) (<-chan Out, error))
 			if !ok {
-				return nil, fmt.Errorf("invalid subscription function")
+				return nil, errors.New("invalid subscription function")
 			}
 
 			decoded, err := decodeInput[In](input)
@@ -71,32 +72,9 @@ func Subscription[In, Out any](fn func(context.Context, In) (<-chan Out, error))
 				return nil, err
 			}
 
-			out := make(chan any)
-			if stream == nil {
-				close(out)
-				return out, nil
-			}
-
-			go func() {
-				defer close(out)
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case value, ok := <-stream:
-						if !ok {
-							return
-						}
-						select {
-						case <-ctx.Done():
-							return
-						case out <- value:
-						}
-					}
-				}
-			}()
-
-			return out, nil
+			return mapStream(ctx, stream, func(value Out) (any, bool) {
+				return value, true
+			}), nil
 		},
 	}
 }
@@ -115,7 +93,7 @@ func typedProcedure[In, Out any](kind ProcedureKind, fn func(context.Context, In
 
 			call, ok := rawFn.(func(context.Context, In) (Out, error))
 			if !ok {
-				return nil, fmt.Errorf("invalid procedure function")
+				return nil, errors.New("invalid procedure function")
 			}
 
 			decoded, err := decodeInput[In](input)
@@ -148,6 +126,43 @@ func decodeInput[T any](input any) (T, error) {
 	}
 
 	return zero, nil
+}
+
+func mapStream[In, Out any](ctx context.Context, in <-chan In, mapValue func(In) (Out, bool)) <-chan Out {
+	ctx = ensureContext(ctx)
+
+	out := make(chan Out)
+	if in == nil {
+		close(out)
+		return out
+	}
+
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case value, ok := <-in:
+				if !ok {
+					return
+				}
+
+				mapped, keepGoing := mapValue(value)
+				if !keepGoing {
+					return
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case out <- mapped:
+				}
+			}
+		}
+	}()
+
+	return out
 }
 
 func typeName[T any]() string {

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type procedure struct {
@@ -56,7 +57,7 @@ func scanPackage(dir string) (packageScan, error) {
 		return packageScan{}, err
 	}
 	if len(packages) == 0 {
-		return packageScan{}, fmt.Errorf("no Go package found in %s", dir)
+		return packageScan{}, fmt.Errorf("no go package found in %s", dir)
 	}
 
 	var pkgName string
@@ -73,7 +74,7 @@ func scanPackage(dir string) (packageScan, error) {
 		break
 	}
 	if pkgName == "" {
-		return packageScan{}, fmt.Errorf("no Go package found in %s", dir)
+		return packageScan{}, fmt.Errorf("no go package found in %s", dir)
 	}
 
 	var procedures []procedure
@@ -1221,17 +1222,21 @@ func lastKeyPart(key string) string {
 
 func exportName(s string) string {
 	var b strings.Builder
+	b.Grow(len(s))
 	upperNext := true
 	for _, r := range s {
-		if r == '.' || r == '_' || r == '-' || r == '/' {
+		switch r {
+		case '.', '_', '-', '/':
 			upperNext = true
 			continue
 		}
+
 		if upperNext {
-			b.WriteString(strings.ToUpper(string(r)))
+			b.WriteRune(unicode.ToUpper(r))
 			upperNext = false
 			continue
 		}
+
 		b.WriteRune(r)
 	}
 	out := b.String()

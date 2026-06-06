@@ -99,16 +99,16 @@ func TestReadInputPOSTDecodesRequestBody(t *testing.T) {
 func TestReadInputPOSTRejectsInvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/neo/user.create", strings.NewReader(`not-json`))
 	_, err := readInput(req)
-	if err == nil || err.Error() != "invalid JSON body" {
-		t.Fatalf("error = %v, want invalid JSON body", err)
+	if err == nil || err.Error() != "invalid json body" {
+		t.Fatalf("error = %v, want invalid json body", err)
 	}
 }
 
 func TestReadInputPOSTRejectsTrailingJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/neo/user.create", strings.NewReader(`{"input":{"name":"Kamil"}} {}`))
 	_, err := readInput(req)
-	if err == nil || err.Error() != "invalid JSON body" {
-		t.Fatalf("error = %v, want invalid JSON body", err)
+	if err == nil || err.Error() != "invalid json body" {
+		t.Fatalf("error = %v, want invalid json body", err)
 	}
 }
 

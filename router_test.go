@@ -181,6 +181,35 @@ func TestMetadataReturnsStableKeyOrder(t *testing.T) {
 	}
 }
 
+func TestNilRegistrationRemovesMetadata(t *testing.T) {
+	router := NewRouter()
+	router.Register("ping", Query(func(context.Context, struct{}) (string, error) {
+		return "pong", nil
+	}))
+	router.Register("ping", nil)
+
+	if router.Method("ping") != nil {
+		t.Fatal("method = non-nil, want nil")
+	}
+	if got := router.Metadata(); len(got) != 0 {
+		t.Fatalf("metadata = %#v, want empty", got)
+	}
+
+	router.RegisterSubscription("events", Subscription(func(context.Context, struct{}) (<-chan string, error) {
+		ch := make(chan string)
+		close(ch)
+		return ch, nil
+	}))
+	router.RegisterSubscription("events", nil)
+
+	if router.Subscription("events") != nil {
+		t.Fatal("subscription = non-nil, want nil")
+	}
+	if got := router.Metadata(); len(got) != 0 {
+		t.Fatalf("metadata = %#v, want empty", got)
+	}
+}
+
 func TestServerOptionsDefaultsNonPositiveMaxRequestBody(t *testing.T) {
 	opts := (ServerOptions{MaxRequestBody: -1}).withDefaults()
 	if opts.MaxRequestBody != DefaultMaxRequestBody {

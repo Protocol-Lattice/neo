@@ -51,7 +51,7 @@ func BenchmarkNeoQueryHTTPServer(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
 		if err != nil {
 			b.Fatal(err)
@@ -86,7 +86,7 @@ func BenchmarkPlainQueryHTTPServer(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
 		if err != nil {
 			b.Fatal(err)
@@ -122,7 +122,7 @@ func BenchmarkNeoMutationHTTPServer(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
 		if err != nil {
 			b.Fatal(err)
@@ -164,7 +164,7 @@ func BenchmarkPlainMutationHTTPServer(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rawBody, err := json.Marshal(input)
 		if err != nil {
 			b.Fatal(err)
