@@ -293,15 +293,18 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 			return
 		}
 
-		key := strings.TrimPrefix(r.URL.Path, prefix)
+		key := r.URL.Path
+		if len(key) >= len(prefix) {
+			key = key[len(prefix):]
+		}
 		key = strings.Trim(key, "/")
 
-		if subscription := router.Subscription(key); subscription != nil {
+		if subscription := router.subscriptions[key]; subscription != nil {
 			router.serveSubscription(w, r, key, subscription)
 			return
 		}
 
-		procedure := router.Method(key)
+		procedure := router.procedures[key]
 		if procedure == nil {
 			writeProcedureError(w, NewError(CodeNotFound, "procedure not found"))
 			return
@@ -319,11 +322,7 @@ func (router *Router) ServeHTTP(mux *http.ServeMux, prefix string) {
 			return
 		}
 
-		handler := applyMiddlewares(router.procedureMiddlewares[key], func(ctx context.Context, input any) (any, error) {
-			return procedure.Call(ctx, procedure.Fn, input)
-		})
-
-		output, err := handler(r.Context(), input)
+		output, err := callProcedure(r.Context(), procedure, router.procedureMiddlewares[key], input)
 		if err != nil {
 			writeProcedureError(w, err)
 			return
@@ -362,11 +361,7 @@ func (router *Router) openSubscriptionStream(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 
-	handler := applyMiddlewares(router.subscriptionMiddlewares[key], func(ctx context.Context, input any) (any, error) {
-		return subscription.Call(ctx, subscription.Fn, input)
-	})
-
-	rawStream, err := handler(r.Context(), input)
+	rawStream, err := callSubscription(r.Context(), subscription, router.subscriptionMiddlewares[key], input)
 	if err != nil {
 		writeProcedureError(w, err)
 		return nil, false
@@ -408,6 +403,38 @@ func serveNDJSONSubscription(w http.ResponseWriter, r *http.Request, stream <-ch
 			flusher.Flush()
 		}
 	}
+}
+
+func callProcedure(
+	ctx context.Context,
+	procedure *Procedure[any, any, any],
+	middlewares []Middleware,
+	input any,
+) (any, error) {
+	if len(middlewares) == 0 {
+		return procedure.Call(ctx, procedure.Fn, input)
+	}
+
+	handler := applyMiddlewares(middlewares, func(ctx context.Context, input any) (any, error) {
+		return procedure.Call(ctx, procedure.Fn, input)
+	})
+	return handler(ctx, input)
+}
+
+func callSubscription(
+	ctx context.Context,
+	subscription *SubscriptionProcedure[any, any, any],
+	middlewares []Middleware,
+	input any,
+) (any, error) {
+	if len(middlewares) == 0 {
+		return subscription.Call(ctx, subscription.Fn, input)
+	}
+
+	handler := applyMiddlewares(middlewares, func(ctx context.Context, input any) (any, error) {
+		return subscription.Call(ctx, subscription.Fn, input)
+	})
+	return handler(ctx, input)
 }
 
 func applyMiddlewares(middlewares []Middleware, handler Handler) Handler {

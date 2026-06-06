@@ -880,6 +880,13 @@ Run benchmarks:
 go test -bench=. -benchmem ./...
 ```
 
+Run the in-process `bufconn` example, which mounts Neo on an in-memory listener
+and bypasses kernel TCP entirely:
+
+```bash
+go run ./examples/bufconn
+```
+
 Recommended full check:
 
 ```bash

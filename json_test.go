@@ -72,8 +72,32 @@ func TestReadInputGETDecodesInputQuery(t *testing.T) {
 	}
 }
 
+func TestReadInputGETDecodesEscapedInputQuery(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, `/neo/hello?trace=1&input=%7B%22name%22%3A%22Neo+Smith%22%7D`, nil)
+	input, err := readInput(req)
+	if err != nil {
+		t.Fatalf("read input: %v", err)
+	}
+
+	decoded, err := decodeInput[testInput](input)
+	if err != nil {
+		t.Fatalf("decode typed input: %v", err)
+	}
+	if decoded.Name != "Neo Smith" {
+		t.Fatalf("name = %q, want Neo Smith", decoded.Name)
+	}
+}
+
 func TestReadInputGETRejectsInvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/neo/hello?input=not-json", nil)
+	_, err := readInput(req)
+	if err == nil || err.Error() != "invalid input query" {
+		t.Fatalf("error = %v, want invalid input query", err)
+	}
+}
+
+func TestReadInputGETRejectsInvalidQueryEscape(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/neo/hello?input=%zz", nil)
 	_, err := readInput(req)
 	if err == nil || err.Error() != "invalid input query" {
 		t.Fatalf("error = %v, want invalid input query", err)

@@ -5,7 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 )
+
+type rawRequest struct {
+	Input json.RawMessage `json:"input"`
+}
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -23,13 +28,15 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func readInput(r *http.Request) (any, error) {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		rawInput := r.URL.Query().Get("input")
-		if rawInput == "" {
+		input, err := readQueryInput(r.URL.RawQuery)
+		if err != nil {
+			return nil, errors.New("invalid input query")
+		}
+		if len(input) == 0 {
 			return nil, nil
 		}
 
-		var input any
-		if err := json.Unmarshal([]byte(rawInput), &input); err != nil {
+		if !json.Valid(input) {
 			return nil, errors.New("invalid input query")
 		}
 
@@ -40,9 +47,12 @@ func readInput(r *http.Request) (any, error) {
 			_ = r.Body.Close()
 		}()
 
-		var req Request
+		var req rawRequest
 		if err := decodeSingleJSON(r.Body, &req); err != nil {
 			return nil, errors.New("invalid json body")
+		}
+		if len(req.Input) == 0 {
+			return nil, nil
 		}
 
 		return req.Input, nil
@@ -52,19 +62,88 @@ func readInput(r *http.Request) (any, error) {
 	}
 }
 
-func decodeSingleJSON(r io.Reader, value any) error {
-	decoder := json.NewDecoder(r)
-	if err := decoder.Decode(value); err != nil {
-		return err
-	}
-
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return errors.New("multiple json values")
+func readQueryInput(rawQuery string) (json.RawMessage, error) {
+	for rawQuery != "" {
+		param := rawQuery
+		if before, after, ok := strings.Cut(rawQuery, "&"); ok {
+			param = before
+			rawQuery = after
+		} else {
+			rawQuery = ""
 		}
+
+		key, value, hasValue := strings.Cut(param, "=")
+		if key != "input" {
+			continue
+		}
+		if !hasValue || value == "" {
+			return nil, nil
+		}
+
+		return queryUnescapeBytes(value)
+	}
+
+	return nil, nil
+}
+
+func queryUnescapeBytes(value string) (json.RawMessage, error) {
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '+', '%':
+			return appendQueryUnescaped(make([]byte, 0, len(value)), value)
+		}
+	}
+
+	return json.RawMessage(value), nil
+}
+
+func appendQueryUnescaped(dst []byte, value string) (json.RawMessage, error) {
+	for i := 0; i < len(value); i++ {
+		switch ch := value[i]; ch {
+		case '+':
+			dst = append(dst, ' ')
+		case '%':
+			if i+2 >= len(value) {
+				return nil, errors.New("invalid query escape")
+			}
+
+			hi, ok := fromHex(value[i+1])
+			if !ok {
+				return nil, errors.New("invalid query escape")
+			}
+			lo, ok := fromHex(value[i+2])
+			if !ok {
+				return nil, errors.New("invalid query escape")
+			}
+
+			dst = append(dst, hi<<4|lo)
+			i += 2
+		default:
+			dst = append(dst, ch)
+		}
+	}
+
+	return dst, nil
+}
+
+func fromHex(ch byte) (byte, bool) {
+	switch {
+	case ch >= '0' && ch <= '9':
+		return ch - '0', true
+	case ch >= 'a' && ch <= 'f':
+		return ch - 'a' + 10, true
+	case ch >= 'A' && ch <= 'F':
+		return ch - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func decodeSingleJSON(r io.Reader, value any) error {
+	raw, err := io.ReadAll(r)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	return json.Unmarshal(raw, value)
 }

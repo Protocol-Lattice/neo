@@ -733,6 +733,148 @@
         background: var(--green);
       }
 
+      .benchmark-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 0.7fr) minmax(520px, 1.3fr);
+        gap: 54px;
+        align-items: start;
+        margin-top: 46px;
+      }
+
+      .benchmark-summary {
+        display: grid;
+        gap: 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .benchmark-summary div {
+        padding: 20px 0;
+      }
+
+      .benchmark-summary div + div {
+        border-top: 1px solid var(--line);
+      }
+
+      .benchmark-summary strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--ink);
+        font-size: 1.7rem;
+        line-height: 1;
+      }
+
+      .benchmark-summary span {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .benchmark-summary code,
+      .benchmark-note code,
+      .section-intro code {
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      .benchmark-chart {
+        min-width: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background: rgba(24, 25, 22, 0.9);
+      }
+
+      .benchmark-chart header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 17px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .benchmark-chart h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .benchmark-chart header span {
+        color: var(--dim);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.78rem;
+        text-align: right;
+      }
+
+      .chart-group {
+        padding: 20px 18px 22px;
+      }
+
+      .chart-group + .chart-group {
+        border-top: 1px solid var(--line);
+      }
+
+      .chart-group h4 {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.78rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .bar-row {
+        display: grid;
+        grid-template-columns: 150px minmax(120px, 1fr) 88px;
+        gap: 14px;
+        align-items: center;
+      }
+
+      .bar-row + .bar-row {
+        margin-top: 13px;
+      }
+
+      .bar-label {
+        min-width: 0;
+        color: var(--ink);
+        font-size: 0.92rem;
+      }
+
+      .bar-track {
+        position: relative;
+        height: 28px;
+        overflow: hidden;
+        border-radius: 4px;
+        background: rgba(245, 242, 233, 0.06);
+      }
+
+      .bar {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: var(--bar-width);
+        background: linear-gradient(90deg, var(--green), rgba(100, 242, 154, 0.5));
+      }
+
+      .bar.grpc {
+        background: linear-gradient(90deg, var(--blue), rgba(134, 183, 255, 0.48));
+      }
+
+      .bar-value {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+        text-align: right;
+      }
+
+      .benchmark-note {
+        margin: 0;
+        padding: 16px 18px;
+        border-top: 1px solid var(--line);
+        color: var(--dim);
+        font-size: 0.86rem;
+        line-height: 1.6;
+      }
+
       .final-cta {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -792,7 +934,8 @@
 
         .hero-inner,
         .split,
-        .quickstart {
+        .quickstart,
+        .benchmark-layout {
           grid-template-columns: 1fr;
         }
 
@@ -958,6 +1101,28 @@
         .quickstart {
           grid-template-columns: 1fr;
         }
+
+        .benchmark-chart header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .benchmark-chart header span {
+          text-align: left;
+        }
+
+        .bar-row {
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+
+        .bar-track {
+          height: 24px;
+        }
+
+        .bar-value {
+          text-align: left;
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -986,6 +1151,7 @@
       <nav class="nav" aria-label="Page sections">
         <a href="#workflow">Workflow</a>
         <a href="#protocol">Protocol</a>
+        <a href="#benchmarks">Benchmarks</a>
         <a href="#quickstart">Quick start</a>
       </nav>
     </header>
@@ -1173,6 +1339,81 @@ router.ListenAndServe(neo.ServerOptions{
             </div>
           </div>
         </aside>
+      </section>
+
+      <section class="section reveal" id="benchmarks" aria-labelledby="benchmarks-title">
+        <p class="section-kicker">Local benchmark</p>
+        <h2 id="benchmarks-title">Neo can bypass kernel TCP and stay ahead of gRPC.</h2>
+        <p class="section-intro">
+          Mount Neo on <code>bufconn</code> for in-process calls that still
+          exercise the HTTP handler and JSON envelope without touching a kernel
+          socket.
+        </p>
+        <div class="benchmark-layout">
+          <div class="benchmark-summary" aria-label="Benchmark summary">
+            <div>
+              <strong>17.0 us</strong>
+              <span>Neo query over <code>bufconn</code> on an Apple M2.</span>
+            </div>
+            <div>
+              <strong>21% lower</strong>
+              <span>Latency than the gRPC unary <code>bufconn</code> baseline in the same benchmark run.</span>
+            </div>
+            <div>
+              <strong>49% fewer</strong>
+              <span>Allocations than the gRPC unary path for the in-memory row.</span>
+            </div>
+          </div>
+
+          <figure class="benchmark-chart" aria-labelledby="chart-title">
+            <header>
+              <h3 id="chart-title">Unary request cost</h3>
+              <span>lower is better / us/op</span>
+            </header>
+
+            <div class="chart-group">
+              <h4>In-memory listener</h4>
+              <div class="bar-row">
+                <span class="bar-label">Neo query bufconn</span>
+                <span class="bar-track" aria-hidden="true">
+                  <span class="bar" style="--bar-width: 79%"></span>
+                </span>
+                <span class="bar-value">17.0</span>
+              </div>
+              <div class="bar-row">
+                <span class="bar-label">gRPC unary bufconn</span>
+                <span class="bar-track" aria-hidden="true">
+                  <span class="bar grpc" style="--bar-width: 100%"></span>
+                </span>
+                <span class="bar-value">21.5</span>
+              </div>
+            </div>
+
+            <div class="chart-group">
+              <h4>Loopback TCP</h4>
+              <div class="bar-row">
+                <span class="bar-label">Neo query HTTP</span>
+                <span class="bar-track" aria-hidden="true">
+                  <span class="bar" style="--bar-width: 95%"></span>
+                </span>
+                <span class="bar-value">44.3</span>
+              </div>
+              <div class="bar-row">
+                <span class="bar-label">gRPC unary TCP</span>
+                <span class="bar-track" aria-hidden="true">
+                  <span class="bar grpc" style="--bar-width: 100%"></span>
+                </span>
+                <span class="bar-value">46.7</span>
+              </div>
+            </div>
+
+            <p class="benchmark-note">
+              <code>go test -bench</code> on Apple M2, Go 1.26.3. The
+              <code>bufconn</code> example is runnable with
+              <code>go run ./examples/bufconn</code>.
+            </p>
+          </figure>
+        </div>
       </section>
 
       <section class="section reveal" id="quickstart" aria-labelledby="quickstart-title">

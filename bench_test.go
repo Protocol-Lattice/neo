@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/interop/grpc_testing"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 type benchInput struct {
@@ -19,9 +25,20 @@ type benchOutput struct {
 	Sum int `json:"sum"`
 }
 
-func newBenchmarkNeoClient(b *testing.B, kind ProcedureKind) *ClientProcedure {
-	b.Helper()
+type benchGRPCServer struct {
+	grpc_testing.UnimplementedBenchmarkServiceServer
+}
 
+func (benchGRPCServer) UnaryCall(context.Context, *grpc_testing.SimpleRequest) (*grpc_testing.SimpleResponse, error) {
+	return &grpc_testing.SimpleResponse{
+		Payload: &grpc_testing.Payload{
+			Type: grpc_testing.PayloadType_COMPRESSABLE,
+			Body: []byte("42"),
+		},
+	}, nil
+}
+
+func newBenchmarkNeoRouter(kind ProcedureKind) *Router {
 	router := NewRouter()
 	fn := func(ctx context.Context, input benchInput) (benchOutput, error) {
 		return benchOutput{Sum: input.A + input.B}, nil
@@ -33,6 +50,13 @@ func newBenchmarkNeoClient(b *testing.B, kind ProcedureKind) *ClientProcedure {
 		router.Register("sum", Query[benchInput, benchOutput](fn))
 	}
 
+	return router
+}
+
+func newBenchmarkNeoClient(b *testing.B, kind ProcedureKind) *ClientProcedure {
+	b.Helper()
+
+	router := newBenchmarkNeoRouter(kind)
 	server := newTestServer(router)
 	b.Cleanup(server.Close)
 
@@ -41,6 +65,137 @@ func newBenchmarkNeoClient(b *testing.B, kind ProcedureKind) *ClientProcedure {
 		return client.Mutation.Procedure("sum")
 	}
 	return client.Query.Procedure("sum")
+}
+
+func newBenchmarkNeoBufConnClient(b *testing.B, kind ProcedureKind) (*ClientProcedure, func()) {
+	b.Helper()
+
+	listener := bufconn.Listen(1 << 20)
+	mux := http.NewServeMux()
+	newBenchmarkNeoRouter(kind).ServeHTTP(mux, "/neo/")
+
+	server := &http.Server{Handler: mux}
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return listener.DialContext(ctx)
+		},
+	}
+
+	cleanup := func() {
+		transport.CloseIdleConnections()
+		if err := server.Close(); err != nil {
+			b.Logf("neo bufconn benchmark server close: %v", err)
+		}
+		_ = listener.Close()
+
+		if err := <-serveErr; err != nil && err != http.ErrServerClosed {
+			b.Logf("neo bufconn benchmark server stopped: %v", err)
+		}
+	}
+
+	client := NewClient("http://bufconn/neo", WithHTTPClient(&http.Client{Transport: transport}))
+	if kind == ProcedureKindMutation {
+		return client.Mutation.Procedure("sum"), cleanup
+	}
+	return client.Query.Procedure("sum"), cleanup
+}
+
+func newBenchmarkGRPCClient(b *testing.B) (grpc_testing.BenchmarkServiceClient, *grpc_testing.SimpleRequest) {
+	b.Helper()
+
+	const bufferSize = 1 << 20
+
+	listener := bufconn.Listen(bufferSize)
+	server := grpc.NewServer()
+	grpc_testing.RegisterBenchmarkServiceServer(server, benchGRPCServer{})
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	b.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+
+		if err := <-serveErr; err != nil {
+			b.Logf("grpc benchmark server stopped: %v", err)
+		}
+	})
+
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	request := &grpc_testing.SimpleRequest{
+		Payload: &grpc_testing.Payload{
+			Type: grpc_testing.PayloadType_COMPRESSABLE,
+			Body: []byte(`{"a":40,"b":2}`),
+		},
+	}
+
+	return grpc_testing.NewBenchmarkServiceClient(conn), request
+}
+
+func newBenchmarkGRPCTCPClient(b *testing.B) (grpc_testing.BenchmarkServiceClient, *grpc_testing.SimpleRequest) {
+	b.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	server := grpc.NewServer()
+	grpc_testing.RegisterBenchmarkServiceServer(server, benchGRPCServer{})
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	b.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+
+		if err := <-serveErr; err != nil {
+			b.Logf("grpc benchmark server stopped: %v", err)
+		}
+	})
+
+	conn, err := grpc.NewClient(
+		listener.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	request := &grpc_testing.SimpleRequest{
+		Payload: &grpc_testing.Payload{
+			Type: grpc_testing.PayloadType_COMPRESSABLE,
+			Body: []byte(`{"a":40,"b":2}`),
+		},
+	}
+
+	return grpc_testing.NewBenchmarkServiceClient(conn), request
 }
 
 func BenchmarkNeoQueryHTTPServer(b *testing.B) {
@@ -58,6 +213,63 @@ func BenchmarkNeoQueryHTTPServer(b *testing.B) {
 		}
 		if got.Sum != 42 {
 			b.Fatalf("sum = %d, want 42", got.Sum)
+		}
+	}
+}
+
+func BenchmarkNeoQueryBufConn(b *testing.B) {
+	procedure, cleanup := newBenchmarkNeoBufConnClient(b, ProcedureKindQuery)
+	defer cleanup()
+
+	ctx := context.Background()
+	input := benchInput{A: 40, B: 2}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if got.Sum != 42 {
+			b.Fatalf("sum = %d, want 42", got.Sum)
+		}
+	}
+}
+
+func BenchmarkGRPCUnaryBufConn(b *testing.B) {
+	client, input := newBenchmarkGRPCClient(b)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		got, err := client.UnaryCall(ctx, input)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if string(got.GetPayload().GetBody()) != "42" {
+			b.Fatalf("payload = %q, want 42", got.GetPayload().GetBody())
+		}
+	}
+}
+
+func BenchmarkGRPCUnaryTCPServer(b *testing.B) {
+	client, input := newBenchmarkGRPCTCPClient(b)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		got, err := client.UnaryCall(ctx, input)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if string(got.GetPayload().GetBody()) != "42" {
+			b.Fatalf("payload = %q, want 42", got.GetPayload().GetBody())
 		}
 	}
 }
@@ -116,6 +328,27 @@ func BenchmarkPlainQueryHTTPServer(b *testing.B) {
 
 func BenchmarkNeoMutationHTTPServer(b *testing.B) {
 	procedure := newBenchmarkNeoClient(b, ProcedureKindMutation)
+	ctx := context.Background()
+	input := benchInput{A: 40, B: 2}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		got, err := CallTyped[benchInput, benchOutput](ctx, procedure, input)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if got.Sum != 42 {
+			b.Fatalf("sum = %d, want 42", got.Sum)
+		}
+	}
+}
+
+func BenchmarkNeoMutationBufConn(b *testing.B) {
+	procedure, cleanup := newBenchmarkNeoBufConnClient(b, ProcedureKindMutation)
+	defer cleanup()
+
 	ctx := context.Background()
 	input := benchInput{A: 40, B: 2}
 

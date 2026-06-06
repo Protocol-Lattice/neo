@@ -39,13 +39,13 @@ func SubscribeWebSocketTyped[In, Out any](ctx context.Context, procedure *Client
 
 // SubscribeWebSocket opens this procedure as a WebSocket subscription.
 func (procedure *ClientProcedure) SubscribeWebSocket(ctx context.Context, input any) (<-chan any, error) {
-	return procedure.client.subscribeWebSocket(ctx, procedure.key, input)
+	return procedure.client.subscribeWebSocket(ctx, procedure.key, procedure.endpoint, input)
 }
 
-func (client *Client) subscribeWebSocket(ctx context.Context, key string, input any) (<-chan any, error) {
+func (client *Client) subscribeWebSocket(ctx context.Context, key string, endpoint string, input any) (<-chan any, error) {
 	ctx = ensureContext(ctx)
 
-	httpURL, err := client.subscriptionURL(key, input)
+	httpURL, err := client.subscriptionURL(key, endpoint, input)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +104,11 @@ func (client *Client) subscribeWebSocket(ctx context.Context, key string, input 
 	return out, nil
 }
 
-func (client *Client) subscriptionURL(key string, input any) (string, error) {
-	endpoint := fmt.Sprintf("%s/%s", client.addr, strings.Trim(key, "/"))
+func (client *Client) subscriptionURL(key string, endpoint string, input any) (string, error) {
+	if endpoint == "" {
+		key = strings.Trim(key, "/")
+		endpoint = client.endpoint(key)
+	}
 	if input == nil {
 		return endpoint, nil
 	}
@@ -114,7 +117,7 @@ func (client *Client) subscriptionURL(key string, input any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("marshal websocket subscription input: %w", err)
 	}
-	return endpoint + "?input=" + url.QueryEscape(string(rawInput)), nil
+	return endpointWithInput(endpoint, rawInput), nil
 }
 
 func httpToWebSocketURL(raw string) string {

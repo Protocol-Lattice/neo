@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,16 @@ func TestClientNewRequestPOSTEncodesBody(t *testing.T) {
 	}
 	if decoded.Name != "Kamil" {
 		t.Fatalf("input = %#v, want Kamil", decoded)
+	}
+}
+
+func TestEndpointWithInputMatchesQueryEscape(t *testing.T) {
+	rawInput := []byte(`{"name":"Neo + Trinity","symbols":"{}[],:/%"}`)
+	got := endpointWithInput("http://example.test/neo/hello", rawInput)
+	want := "http://example.test/neo/hello?input=" + url.QueryEscape(string(rawInput))
+
+	if got != want {
+		t.Fatalf("endpoint = %q, want %q", got, want)
 	}
 }
 

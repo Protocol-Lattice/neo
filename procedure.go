@@ -16,6 +16,8 @@ const (
 	ProcedureKindSubscription ProcedureKind = "subscription"
 )
 
+var jsonRawMessageType = reflect.TypeOf(json.RawMessage{})
+
 type ProcedureMeta struct {
 	Key    string        `json:"key"`
 	Kind   ProcedureKind `json:"kind"`
@@ -109,6 +111,19 @@ func typedProcedure[In, Out any](kind ProcedureKind, fn func(context.Context, In
 func decodeInput[T any](input any) (T, error) {
 	var zero T
 	if input == nil {
+		return zero, nil
+	}
+
+	if raw, ok := input.(json.RawMessage); ok {
+		if len(raw) == 0 {
+			return zero, nil
+		}
+		if reflect.TypeOf((*T)(nil)).Elem() == jsonRawMessageType {
+			return any(raw).(T), nil
+		}
+		if err := json.Unmarshal(raw, &zero); err != nil {
+			return zero, fmt.Errorf("decode typed input into %s: %w", typeName[T](), err)
+		}
 		return zero, nil
 	}
 
