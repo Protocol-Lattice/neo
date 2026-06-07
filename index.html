@@ -540,6 +540,104 @@
         line-height: 1.62;
       }
 
+      .architecture-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
+        gap: 54px;
+        align-items: start;
+        margin-top: 46px;
+      }
+
+      .architecture-map {
+        min-width: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background:
+          linear-gradient(135deg, rgba(100, 242, 154, 0.08), transparent 44%),
+          rgba(24, 25, 22, 0.92);
+      }
+
+      .architecture-tier {
+        display: grid;
+        gap: 14px;
+        padding: 20px;
+      }
+
+      .architecture-tier + .architecture-tier {
+        border-top: 1px solid var(--line);
+      }
+
+      .tier-label {
+        color: var(--dim);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.76rem;
+        text-transform: uppercase;
+      }
+
+      .arch-node {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 16px;
+        background: rgba(245, 242, 233, 0.04);
+      }
+
+      .arch-node strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--ink);
+      }
+
+      .arch-node span,
+      .arch-path {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .arch-node code,
+      .arch-path code {
+        color: var(--green);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.9em;
+      }
+
+      .service-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .arch-paths {
+        display: grid;
+        gap: 12px;
+        margin-top: 22px;
+        border-top: 1px solid var(--line);
+        padding-top: 22px;
+      }
+
+      .arch-path {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 16px;
+      }
+
+      .arch-path strong {
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+
+      .architecture-layout .feature-list {
+        margin-top: 0;
+      }
+
+      .architecture-layout .feature-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 18px 0;
+      }
+
       .split {
         display: grid;
         grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
@@ -651,6 +749,10 @@
 
       .method.ws {
         background: var(--blue);
+      }
+
+      .method.bin {
+        background: var(--coral);
       }
 
       .route code {
@@ -935,6 +1037,7 @@
         .hero-inner,
         .split,
         .quickstart,
+        .architecture-layout,
         .benchmark-layout {
           grid-template-columns: 1fr;
         }
@@ -1089,6 +1192,19 @@
           border-top: 1px solid var(--line);
         }
 
+        .architecture-layout {
+          gap: 28px;
+        }
+
+        .service-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .arch-path {
+          grid-template-columns: 1fr;
+          gap: 6px;
+        }
+
         .feature-row {
           grid-template-columns: 1fr;
           gap: 10px;
@@ -1150,6 +1266,7 @@
       </a>
       <nav class="nav" aria-label="Page sections">
         <a href="#workflow">Workflow</a>
+        <a href="#architecture">Architecture</a>
         <a href="#protocol">Protocol</a>
         <a href="#benchmarks">Benchmarks</a>
         <a href="#quickstart">Quick start</a>
@@ -1287,14 +1404,91 @@ router.ListenAndServe(neo.ServerOptions{
         </div>
       </section>
 
+      <section class="section reveal" id="architecture" aria-labelledby="architecture-title">
+        <p class="section-kicker">Microservices without a second API model</p>
+        <h2 id="architecture-title">One public gateway, independently owned services.</h2>
+        <p class="section-intro">
+          Neo routers can be mounted locally for modular monoliths or proxied
+          through a gateway when users, orders, and auth live in separate
+          processes. Metadata keeps the generated client shaped like the full
+          system.
+        </p>
+        <div class="architecture-layout">
+          <div class="architecture-map" aria-label="Neo microservices architecture">
+            <div class="architecture-tier">
+              <span class="tier-label">Clients</span>
+              <div class="arch-node">
+                <strong>Go and TypeScript clients</strong>
+                <span>Generated namespaces call <code>users.getByID</code>, <code>orders.create</code>, and <code>auth.me</code>.</span>
+              </div>
+            </div>
+            <div class="architecture-tier">
+              <span class="tier-label">Gateway</span>
+              <div class="arch-node">
+                <strong><code>/neo</code> public API</strong>
+                <span>Prefixes metadata, forwards headers, and strips service keys before proxying upstream.</span>
+              </div>
+            </div>
+            <div class="architecture-tier">
+              <span class="tier-label">Services</span>
+              <div class="service-grid">
+                <div class="arch-node">
+                  <strong>users</strong>
+                  <span><code>getByID</code></span>
+                </div>
+                <div class="arch-node">
+                  <strong>orders</strong>
+                  <span><code>create</code></span>
+                </div>
+                <div class="arch-node">
+                  <strong>auth</strong>
+                  <span><code>login</code> / <code>me</code></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="feature-list">
+              <div class="feature-row">
+                <strong>Local mount</strong>
+                <span>Attach routers in-process when a service boundary is organizational, not operational.</span>
+              </div>
+              <div class="feature-row">
+                <strong>Remote proxy</strong>
+                <span>Expose service-prefixed procedures while each upstream still owns its local keys.</span>
+              </div>
+              <div class="feature-row">
+                <strong>Auth handoff</strong>
+                <span>Forward bearer headers through the gateway or resolve tokens with service-to-service calls.</span>
+              </div>
+            </div>
+            <div class="arch-paths" aria-label="Example request paths">
+              <div class="arch-path">
+                <strong>client</strong>
+                <span><code>orders.create</code> enters the gateway as one public procedure.</span>
+              </div>
+              <div class="arch-path">
+                <strong>gateway</strong>
+                <span>Routes to the orders service as local <code>create</code>.</span>
+              </div>
+              <div class="arch-path">
+                <strong>orders</strong>
+                <span>Calls users or auth with the same typed Neo client surface.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="section split reveal" id="protocol" aria-labelledby="protocol-title">
         <div>
-          <p class="section-kicker">HTTP where it fits, streams where it matters</p>
-          <h2 id="protocol-title">A small RPC surface that still speaks browser.</h2>
+          <p class="section-kicker">HTTP where it fits, binary where it helps</p>
+          <h2 id="protocol-title">A small RPC surface with JSON and Neo binary envelopes.</h2>
           <p class="section-intro">
             Queries can travel over GET or POST, mutations use POST, and
-            subscriptions stream through NDJSON or WebSocket with a shared JSON
-            envelope.
+            subscriptions stream through NDJSON or WebSocket. Go clients can
+            opt into <code>application/x-neo-bin</code> for unary calls without
+            changing procedure code.
           </p>
           <div class="feature-list">
             <div class="feature-row">
@@ -1308,6 +1502,10 @@ router.ListenAndServe(neo.ServerOptions{
             <div class="feature-row">
               <strong>Event broker</strong>
               <span>Start with the in-memory bus, then swap in NATS or any broker implementing Neo's tiny interface.</span>
+            </div>
+            <div class="feature-row">
+              <strong>Binary envelope</strong>
+              <span><code>NEO1</code> TLV records use varints, counted lists, field numbers, and JSON-tagged field names.</span>
             </div>
             <div class="feature-row">
               <strong>Safe errors</strong>
@@ -1330,6 +1528,10 @@ router.ListenAndServe(neo.ServerOptions{
               <code>/user.create {"input":{"name":"Neo"}}</code>
             </div>
             <div class="route">
+              <span class="method bin">BIN</span>
+              <code>Content-Type: application/x-neo-bin · NEO1 TLV</code>
+            </div>
+            <div class="route">
               <span class="method get">NDJSON</span>
               <code>/user.changes Accept: application/x-ndjson</code>
             </div>
@@ -1346,21 +1548,21 @@ router.ListenAndServe(neo.ServerOptions{
         <h2 id="benchmarks-title">Neo can bypass kernel TCP and stay ahead of gRPC.</h2>
         <p class="section-intro">
           Mount Neo on <code>bufconn</code> for in-process calls that still
-          exercise the HTTP handler and JSON envelope without touching a kernel
-          socket.
+          exercise the HTTP handler and RPC envelope without touching a kernel
+          socket. These numbers are from the benchmark suite in this repo.
         </p>
         <div class="benchmark-layout">
           <div class="benchmark-summary" aria-label="Benchmark summary">
             <div>
-              <strong>17.0 us</strong>
+              <strong>17.5 us</strong>
               <span>Neo query over <code>bufconn</code> on an Apple M2.</span>
             </div>
             <div>
-              <strong>21% lower</strong>
+              <strong>18% lower</strong>
               <span>Latency than the gRPC unary <code>bufconn</code> baseline in the same benchmark run.</span>
             </div>
             <div>
-              <strong>49% fewer</strong>
+              <strong>47% fewer</strong>
               <span>Allocations than the gRPC unary path for the in-memory row.</span>
             </div>
           </div>
@@ -1376,9 +1578,9 @@ router.ListenAndServe(neo.ServerOptions{
               <div class="bar-row">
                 <span class="bar-label">Neo query bufconn</span>
                 <span class="bar-track" aria-hidden="true">
-                  <span class="bar" style="--bar-width: 79%"></span>
+                  <span class="bar" style="--bar-width: 82%"></span>
                 </span>
-                <span class="bar-value">17.0</span>
+                <span class="bar-value">17.5</span>
               </div>
               <div class="bar-row">
                 <span class="bar-label">gRPC unary bufconn</span>
@@ -1394,21 +1596,21 @@ router.ListenAndServe(neo.ServerOptions{
               <div class="bar-row">
                 <span class="bar-label">Neo query HTTP</span>
                 <span class="bar-track" aria-hidden="true">
-                  <span class="bar" style="--bar-width: 95%"></span>
+                  <span class="bar" style="--bar-width: 96%"></span>
                 </span>
-                <span class="bar-value">44.3</span>
+                <span class="bar-value">44.2</span>
               </div>
               <div class="bar-row">
                 <span class="bar-label">gRPC unary TCP</span>
                 <span class="bar-track" aria-hidden="true">
                   <span class="bar grpc" style="--bar-width: 100%"></span>
                 </span>
-                <span class="bar-value">46.7</span>
+                <span class="bar-value">46.1</span>
               </div>
             </div>
 
             <p class="benchmark-note">
-              <code>go test -bench</code> on Apple M2, Go 1.26.3. The
+              <code>go test -bench=. -benchmem ./...</code> on Apple M2, Go 1.26.3. The
               <code>bufconn</code> example is runnable with
               <code>go run ./examples/bufconn</code>.
             </p>
