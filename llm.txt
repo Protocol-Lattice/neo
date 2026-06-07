@@ -57,7 +57,7 @@ Expected top-level files and directories:
 - `broker/nats` — built-in NATS broker adapter.
 - `broker/redis` — built-in Redis Pub/Sub broker adapter.
 - `cmd/neo-gen` — code generator for Go and TypeScript clients.
-- `examples` — runnable examples, including TypeScript client and Prisma auth examples.
+- `examples` — runnable examples, including TypeScript client, microservices, Prisma auth, and microservices Prisma auth examples.
 - `*_test.go` — tests for router, procedures, client, event bus, middleware, JSON, errors, WebSocket, and benchmarks.
 
 ## Public API concepts
