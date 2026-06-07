@@ -21,6 +21,11 @@ Then call through the gateway:
 go run ./examples/microservices/client
 ```
 
+The Go client and the orders-to-users service call both opt into
+`neo.WithBinaryCodec()`, so their unary RPC requests use
+`application/x-neo-bin`. The equivalent curl calls below stay JSON because curl
+is usually the easiest way to inspect the HTTP API by hand.
+
 The gateway package also has generated typed client definitions. Regenerate
 them after changing gateway proxy metadata:
 

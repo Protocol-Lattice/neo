@@ -106,7 +106,7 @@ func main() {
 
 	log.Printf("neo server listening on %s/neo", server.URL)
 
-	client := NewTypedClient(server.URL + "/neo")
+	client := NewTypedClient(server.URL+"/neo", neo.WithBinaryCodec())
 
 	health, err := client.Healthcheck.Query(ctx, NoInput{})
 	if err != nil {

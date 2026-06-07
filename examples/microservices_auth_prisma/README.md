@@ -28,6 +28,10 @@ Then call through the gateway:
 go run ./examples/microservices_auth_prisma/client
 ```
 
+The generated Go client and the orders service's auth-service lookup use
+`neo.WithBinaryCodec()` for unary Go-to-Go calls. Browser-style HTTP examples
+and curl calls remain JSON.
+
 Expected output:
 
 ```txt

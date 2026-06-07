@@ -80,7 +80,7 @@ func main() {
 	server := httptest.NewServer(authContextMiddleware(store, mux))
 	defer server.Close()
 
-	client := NewTypedClient(server.URL + "/neo")
+	client := NewTypedClient(server.URL+"/neo", neo.WithBinaryCodec())
 	if _, err := client.User.Me.Query(ctx, NoInput{}); err != nil {
 		fmt.Printf("unauthenticated user.me: %v\n", err)
 	}
@@ -106,6 +106,7 @@ func main() {
 
 	authenticatedClient := NewTypedClient(
 		server.URL+"/neo",
+		neo.WithBinaryCodec(),
 		neo.WithHeader("Authorization", "Bearer "+registered.Token),
 	)
 

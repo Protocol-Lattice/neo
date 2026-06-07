@@ -34,7 +34,7 @@ type Order struct {
 
 func main() {
 	usersURL := env("USERS_URL", "http://localhost:8081/neo")
-	users := neo.NewClient(usersURL)
+	users := neo.NewClient(usersURL, neo.WithBinaryCodec())
 
 	var nextID atomic.Int64
 	router := neo.NewRouter()

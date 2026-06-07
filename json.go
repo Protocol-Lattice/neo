@@ -8,15 +8,37 @@ import (
 	"strings"
 )
 
+const (
+	jsonContentType = "application/json"
+	ndjsonMediaType = "application/x-ndjson"
+)
+
 type rawRequest struct {
 	Input json.RawMessage `json:"input"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", jsonContentType)
 	w.WriteHeader(status)
 
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeResponse(w http.ResponseWriter, r *http.Request, status int, value any) error {
+	if acceptsContentType(r.Header.Get("Accept"), BinaryContentType) {
+		raw, err := NeoBinaryCodec.Marshal(value)
+		if err != nil {
+			return err
+		}
+
+		w.Header().Set("Content-Type", BinaryContentType)
+		w.WriteHeader(status)
+		_, err = w.Write(raw)
+		return err
+	}
+
+	writeJSON(w, status, value)
+	return nil
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -46,6 +68,14 @@ func readInput(r *http.Request) (any, error) {
 		defer func() {
 			_ = r.Body.Close()
 		}()
+
+		if isContentType(r.Header.Get("Content-Type"), BinaryContentType) {
+			var req Request
+			if err := decodeSingleBinary(r.Body, &req); err != nil {
+				return nil, errors.New("invalid binary body")
+			}
+			return req.Input, nil
+		}
 
 		var req rawRequest
 		if err := decodeSingleJSON(r.Body, &req); err != nil {
@@ -146,4 +176,30 @@ func decodeSingleJSON(r io.Reader, value any) error {
 	}
 
 	return json.Unmarshal(raw, value)
+}
+
+func decodeSingleBinary(r io.Reader, value any) error {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+
+	return NeoBinaryCodec.Unmarshal(raw, value)
+}
+
+func isContentType(header string, contentType string) bool {
+	mediaType, _, _ := strings.Cut(header, ";")
+	return strings.EqualFold(strings.TrimSpace(mediaType), contentType)
+}
+
+func acceptsContentType(header string, contentType string) bool {
+	for header != "" {
+		var part string
+		part, header, _ = strings.Cut(header, ",")
+		mediaType, _, _ := strings.Cut(part, ";")
+		if strings.EqualFold(strings.TrimSpace(mediaType), contentType) {
+			return true
+		}
+	}
+	return false
 }

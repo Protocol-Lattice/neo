@@ -78,6 +78,7 @@ func newBufConnClient(router *neo.Router) (*neo.Client, func()) {
 	client := neo.NewClient(
 		"http://neo.local/neo",
 		neo.WithHTTPClient(&http.Client{Transport: transport}),
+		neo.WithBinaryCodec(),
 	)
 
 	return client, cleanup

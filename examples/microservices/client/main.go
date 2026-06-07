@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	neo "github.com/Protocol-Lattice/neo"
 )
 
 type GetUserInput struct {
@@ -37,7 +39,7 @@ type Order struct {
 func main() {
 	ctx := context.Background()
 	gatewayURL := env("GATEWAY_URL", "http://localhost:8080/neo")
-	client := NewTypedClient(gatewayURL)
+	client := NewTypedClient(gatewayURL, neo.WithBinaryCodec())
 
 	user, err := client.Users.GetByID.Query(ctx, GetUserInput{ID: 1})
 	if err != nil {

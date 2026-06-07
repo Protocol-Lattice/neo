@@ -48,7 +48,7 @@ go run ./cmd/neo-gen -dir ./examples/prisma_auth -out ./examples/prisma_auth/neo
 The example uses it as:
 
 ```go
-client := NewTypedClient(server.URL + "/neo")
+client := NewTypedClient(server.URL+"/neo", neo.WithBinaryCodec())
 registered, err := client.Auth.Register.Mutate(ctx, RegisterInput{
 	Email:    "raezil@example.com",
 	Name:     "Raezil",
@@ -57,10 +57,15 @@ registered, err := client.Auth.Register.Mutate(ctx, RegisterInput{
 
 authenticated := NewTypedClient(
 	server.URL+"/neo",
+	neo.WithBinaryCodec(),
 	neo.WithHeader("Authorization", "Bearer "+registered.Token),
 )
 me, err := authenticated.User.Me.Query(ctx, NoInput{})
 ```
+
+The `neo.WithBinaryCodec()` option makes these unary Go client calls use
+`application/x-neo-bin`; the HTTP middleware and authorization behavior are the
+same as JSON requests.
 
 It also includes a public login query:
 
@@ -76,6 +81,7 @@ Protected queries can then use the returned token:
 ```go
 client := NewTypedClient(
 	server.URL+"/neo",
+	neo.WithBinaryCodec(),
 	neo.WithHeader("Authorization", "Bearer "+login.Token),
 )
 me, err := client.User.Me.Query(ctx, NoInput{})

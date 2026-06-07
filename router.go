@@ -344,9 +344,11 @@ func (router *Router) HTTPHandler(prefix string) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, Response{
+		if err := writeResponse(w, r, http.StatusOK, Response{
 			Result: output,
-		})
+		}); err != nil {
+			writeProcedureError(w, WrapError(CodeInternal, "encode response", err))
+		}
 	})
 }
 
@@ -399,7 +401,7 @@ func serveNDJSONSubscription(w http.ResponseWriter, r *http.Request, stream <-ch
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Type", ndjsonMediaType)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 

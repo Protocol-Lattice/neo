@@ -60,6 +60,9 @@ mutations, and NDJSON subscriptions. Browser WebSocket constructors do not
 allow custom request headers, so WebSocket auth should use cookies or a
 server-issued token encoded in the subscription input or URL.
 
+This TypeScript client intentionally uses JSON. Neo's `application/x-neo-bin`
+codec is currently a Go client option for unary Go-to-Go calls.
+
 The client calls `healthcheck`, reads `user.getByID`, opens a `user.changes`
 NDJSON subscription, creates a user through `user.create`, and receives the
 published subscription event.

@@ -136,9 +136,10 @@ type HelloOutput struct {
 
 func main() {
 	client := neo.NewClient(
-	"http://localhost:8080/neo",
-	neo.WithHeader("Authorization", "Bearer <token>"),
-)
+		"http://localhost:8080/neo",
+		neo.WithBinaryCodec(),
+		neo.WithHeader("Authorization", "Bearer <token>"),
+	)
 
 	out, err := neo.CallTyped[HelloInput, HelloOutput](
 		context.Background(),
@@ -674,6 +675,22 @@ Content-Type: application/json
 }
 ```
 
+### Unary calls with Neo binary
+
+Go clients can opt into Neo's protobuf-like binary envelope for queries and
+mutations:
+
+```go
+client := neo.NewClient("http://localhost:8080/neo", neo.WithBinaryCodec())
+```
+
+Binary requests and responses use `Content-Type: application/x-neo-bin`. The
+format starts with `NEO1`, then encodes values as compact TLV records with
+varint integers, counted lists, and objects that include both field numbers and
+JSON-tagged field names. Query inputs are sent as POST bodies when the binary
+codec is enabled. Metadata, NDJSON subscriptions, and WebSocket subscriptions
+stay JSON-based for browser and streaming compatibility.
+
 ### Subscription over GET with NDJSON
 
 ```http
@@ -916,6 +933,7 @@ func main() {
 
 	client := NewTypedClient(
 		"http://localhost:8080/neo",
+		neo.WithBinaryCodec(),
 		neo.WithHeader("Authorization", "Bearer <token>"),
 		neo.WithHeader("X-Trace-ID", "demo-1"),
 	)
@@ -1027,6 +1045,7 @@ Current codegen gives you:
 - typed subscription `SubscribeWebSocket` methods for WebSocket streams
 - `NewTypedClient(addr, opts...)` support for auth/custom headers
 - `NewTypedClientFromClient(client)` for shared custom clients
+- Go unary calls can opt into `neo.WithBinaryCodec()`
 - generated TypeScript local interfaces from Go structs and JSON tags
 - typed TypeScript query, mutation, NDJSON subscription, and WebSocket subscription helpers
 - TypeScript runtime `metadata()` helper
@@ -1086,7 +1105,7 @@ go test -bench=. -benchmem ./...
 
 Neo favors developer experience and type-friendly RPC ergonomics.
 
-Internally, the generic procedure layer bridges typed Go handlers with transport-level `any` values. This can involve JSON marshal/unmarshal conversion when decoding dynamic inputs into typed structs.
+Internally, the generic procedure layer bridges typed Go handlers with transport-level `any` values. This can involve JSON marshal/unmarshal conversion when decoding dynamic inputs into typed structs. For Go-to-Go unary calls, `neo.WithBinaryCodec()` switches the HTTP request and response envelope to Neo's compact binary TLV format.
 
 That means Neo will not be faster than hand-written `net/http` handlers in raw microbenchmarks.
 

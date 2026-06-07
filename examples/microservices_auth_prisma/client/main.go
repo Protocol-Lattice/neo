@@ -51,7 +51,7 @@ type Order struct {
 func main() {
 	ctx := context.Background()
 	gatewayURL := env("GATEWAY_URL", "http://localhost:8090/neo")
-	client := NewTypedClient(gatewayURL)
+	client := NewTypedClient(gatewayURL, neo.WithBinaryCodec())
 
 	if _, err := client.Orders.Create.Mutate(ctx, CreateOrderInput{SKU: "neo-sticker", Quantity: 2}); err != nil {
 		fmt.Printf("unauthenticated orders.create: %v\n", err)
@@ -78,6 +78,7 @@ func main() {
 
 	authenticated := NewTypedClient(
 		gatewayURL,
+		neo.WithBinaryCodec(),
 		neo.WithHeader("Authorization", "Bearer "+login.Token),
 	)
 
