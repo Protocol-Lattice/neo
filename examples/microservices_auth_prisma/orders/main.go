@@ -142,7 +142,11 @@ func authenticateBearer(ctx context.Context, authURL string, authorization strin
 		return User{}, false
 	}
 
-	client := neo.NewClient(authURL, neo.WithHeader("Authorization", "Bearer "+token))
+	client := neo.NewClient(
+		authURL,
+		neo.WithBinaryCodec(),
+		neo.WithHeader("Authorization", "Bearer "+token),
+	)
 	user, err := neo.CallTyped[NoInput, User](ctx, client.Query.Procedure("me"), NoInput{})
 	if err != nil || user.ID == "" {
 		return User{}, false

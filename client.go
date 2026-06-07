@@ -15,6 +15,7 @@ type Client struct {
 	http    *http.Client
 	addr    string
 	headers http.Header
+	binary  bool
 
 	Query        *ClientNamespace
 	Mutation     *ClientNamespace
@@ -63,6 +64,16 @@ func WithHeaders(headers http.Header) ClientOption {
 				client.headers.Add(name, value)
 			}
 		}
+	}
+}
+
+// WithBinaryCodec makes unary Go client calls use Neo's protobuf-like binary
+// request and response envelopes. Metadata, NDJSON subscriptions, and
+// WebSocket subscriptions intentionally remain JSON-based for browser and
+// streaming compatibility.
+func WithBinaryCodec() ClientOption {
+	return func(client *Client) {
+		client.binary = true
 	}
 }
 
@@ -188,7 +199,7 @@ func (client *Client) call(ctx context.Context, method string, key string, endpo
 	}()
 
 	var rpcRes Response
-	if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
+	if err := decodeHTTPResponse(res, &rpcRes); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
@@ -224,7 +235,7 @@ func callTyped[In, Out any](ctx context.Context, client *Client, method string, 
 	}()
 
 	var rpcRes typedResponse[Out]
-	if err := json.NewDecoder(res.Body).Decode(&rpcRes); err != nil {
+	if err := decodeHTTPResponse(res, &rpcRes); err != nil {
 		return zero, fmt.Errorf("decode response: %w", err)
 	}
 
@@ -246,12 +257,12 @@ func callTyped[In, Out any](ctx context.Context, client *Client, method string, 
 func (client *Client) subscribe(ctx context.Context, key string, endpoint string, input any) (<-chan any, error) {
 	ctx = ensureContext(ctx)
 
-	req, err := client.newProcedureRequest(ctx, http.MethodGet, key, endpoint, input)
+	req, err := client.newJSONProcedureRequest(ctx, http.MethodGet, key, endpoint, input)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Accept", "application/x-ndjson")
+	req.Header.Set("Accept", ndjsonMediaType)
 
 	res, err := client.http.Do(req)
 	if err != nil {
@@ -280,12 +291,12 @@ func (client *Client) subscribe(ctx context.Context, key string, endpoint string
 func subscribeTyped[In, Out any](ctx context.Context, client *Client, key string, endpoint string, input In) (<-chan Out, error) {
 	ctx = ensureContext(ctx)
 
-	req, err := newTypedProcedureRequest(ctx, client, http.MethodGet, key, endpoint, input)
+	req, err := newJSONTypedProcedureRequest(ctx, client, http.MethodGet, key, endpoint, input)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Accept", "application/x-ndjson")
+	req.Header.Set("Accept", ndjsonMediaType)
 
 	res, err := client.http.Do(req)
 	if err != nil {
@@ -359,6 +370,13 @@ func (client *Client) newRequest(ctx context.Context, method string, key string,
 }
 
 func (client *Client) newProcedureRequest(ctx context.Context, method string, key string, endpoint string, input any) (*http.Request, error) {
+	if client.binary {
+		return client.newBinaryProcedureRequest(ctx, method, key, endpoint, Request{Input: input}, input != nil)
+	}
+	return client.newJSONProcedureRequest(ctx, method, key, endpoint, input)
+}
+
+func (client *Client) newJSONProcedureRequest(ctx context.Context, method string, key string, endpoint string, input any) (*http.Request, error) {
 	ctx = ensureContext(ctx)
 	if endpoint == "" {
 		key = strings.Trim(key, "/")
@@ -400,10 +418,24 @@ func (client *Client) newProcedureRequest(ctx context.Context, method string, ke
 		return nil, fmt.Errorf("unsupported method %q", method)
 	}
 
-	return client.newHTTPRequest(ctx, method, endpoint, body)
+	return client.newHTTPRequest(ctx, method, endpoint, body, jsonContentType, jsonContentType)
 }
 
 func newTypedProcedureRequest[In any](
+	ctx context.Context,
+	client *Client,
+	method string,
+	key string,
+	endpoint string,
+	input In,
+) (*http.Request, error) {
+	if client.binary {
+		return client.newBinaryProcedureRequest(ctx, method, key, endpoint, typedRequest[In]{Input: input}, any(input) != nil)
+	}
+	return newJSONTypedProcedureRequest(ctx, client, method, key, endpoint, input)
+}
+
+func newJSONTypedProcedureRequest[In any](
 	ctx context.Context,
 	client *Client,
 	method string,
@@ -452,23 +484,88 @@ func newTypedProcedureRequest[In any](
 		return nil, fmt.Errorf("unsupported method %q", method)
 	}
 
-	return client.newHTTPRequest(ctx, method, endpoint, body)
+	return client.newHTTPRequest(ctx, method, endpoint, body, jsonContentType, jsonContentType)
 }
 
-func (client *Client) newHTTPRequest(ctx context.Context, method string, endpoint string, body io.Reader) (*http.Request, error) {
+func (client *Client) newBinaryProcedureRequest(
+	ctx context.Context,
+	method string,
+	key string,
+	endpoint string,
+	envelope any,
+	hasInput bool,
+) (*http.Request, error) {
+	ctx = ensureContext(ctx)
+	if endpoint == "" {
+		key = strings.Trim(key, "/")
+		endpoint = client.endpoint(key)
+	}
+
+	var body io.Reader
+
+	switch method {
+	case http.MethodGet:
+		if hasInput {
+			rawBody, err := NeoBinaryCodec.Marshal(envelope)
+			if err != nil {
+				return nil, fmt.Errorf("marshal binary query body: %w", err)
+			}
+			method = http.MethodPost
+			body = bytes.NewReader(rawBody)
+		}
+
+	case http.MethodPost:
+		rawBody, err := NeoBinaryCodec.Marshal(envelope)
+		if err != nil {
+			return nil, fmt.Errorf("marshal binary mutation input: %w", err)
+		}
+		body = bytes.NewReader(rawBody)
+
+	default:
+		return nil, fmt.Errorf("unsupported method %q", method)
+	}
+
+	return client.newHTTPRequest(ctx, method, endpoint, body, BinaryContentType, BinaryContentType)
+}
+
+func (client *Client) newHTTPRequest(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body io.Reader,
+	contentType string,
+	accept string,
+) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
 	for name, values := range client.headers {
 		for _, value := range values {
 			req.Header.Add(name, value)
 		}
 	}
+	if contentType != "" && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept != "" && req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", accept)
+	}
 
 	return req, nil
+}
+
+func decodeHTTPResponse(res *http.Response, value any) error {
+	if isContentType(res.Header.Get("Content-Type"), BinaryContentType) {
+		raw, err := io.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+		return NeoBinaryCodec.Unmarshal(raw, value)
+	}
+
+	return json.NewDecoder(res.Body).Decode(value)
 }
 
 func endpointWithInput(endpoint string, rawInput []byte) string {
