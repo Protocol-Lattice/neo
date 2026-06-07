@@ -189,7 +189,8 @@ user, err := neo.CallTyped[GetUserInput, User](
 
 The gateway forwards `users.getByID` to `getByID` on the users service. See
 `examples/microservices` for separate users, orders, gateway, and client
-commands.
+commands, and `examples/microservices_auth_prisma` for a gateway that forwards
+bearer auth to a Prisma-backed auth service and a protected orders service.
 
 Gateway-only packages can still use `neo-gen`: add `neo.WithProxyMetadata(...)`
 to proxied services, then run the generator against the gateway package to
@@ -1223,6 +1224,8 @@ See `examples/prisma_auth` for a runnable example that resolves an
 `Authorization: Bearer ...` token to a user ID, stores that user ID on
 `context.Context`, and uses a `neo-gen` typed client against a password-hash
 Prisma auth flow with `auth.login`, `auth.register`, and protected `user.me`.
+See `examples/microservices_auth_prisma` for the same Prisma-backed auth flow
+split across auth, orders, gateway, and client commands.
 
 ---
 
