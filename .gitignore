@@ -1,2 +1,5 @@
 .worktrees
 .worktrees/
+.specify
+.agents
+skills-lock.json

@@ -1,6 +1,6 @@
 module github.com/Protocol-Lattice/neo/benchmarks
 
-go 1.22.0
+go 1.26.3
 
 require (
 	github.com/Protocol-Lattice/neo v0.0.0

@@ -1,3 +1,3 @@
 module github.com/Protocol-Lattice/neo
 
-go 1.22.0
+go 1.26.3
