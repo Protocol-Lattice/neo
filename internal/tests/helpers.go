@@ -1,4 +1,4 @@
-package router_test
+package tests
 
 import (
 	"context"
@@ -8,32 +8,32 @@ import (
 	routerruntime "github.com/Protocol-Lattice/neo/internal/router"
 )
 
-// testInput and testOutput are shared fixtures used by the package tests.
+// Input and Output are shared fixtures used by the router tests.
 // Keep them intentionally small and JSON-friendly so they exercise the
 // framework's any -> JSON -> typed value path without depending on production
 // types.
-type testInput struct {
+type Input struct {
 	Name    string `json:"name,omitempty"`
 	Message string `json:"message,omitempty"`
 	ID      int    `json:"id,omitempty"`
 	Value   int    `json:"value,omitempty"`
 }
 
-type testOutput struct {
+type Output struct {
 	Message string `json:"message,omitempty"`
 	Name    string `json:"name,omitempty"`
 	ID      int    `json:"id,omitempty"`
 	Value   int    `json:"value,omitempty"`
 }
 
-type typedResponse[T any] struct {
+type TypedResponse[T any] struct {
 	Result T      `json:"result,omitempty"`
 	Code   string `json:"code,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
 
-const largeGETInputBytes = 6 << 10
-const internalErrorMessage = "internal server error"
+const LargeGETInputBytes = 6 << 10
+const InternalErrorMessage = "internal server error"
 
 type (
 	Handler                                = routerruntime.Handler
@@ -96,9 +96,9 @@ func Subscription[In, Out any](
 	return routerruntime.Subscription[In, Out](fn, opts...)
 }
 
-// newTestServer mounts a router under /neo/ and returns an httptest server.
+// NewTestServer mounts a router under /neo/ and returns an httptest server.
 // Existing tests can create a client with NewClient(server.URL + "/neo").
-func newTestServer(router *Router) *httptest.Server {
+func NewTestServer(router *Router) *httptest.Server {
 	mux := http.NewServeMux()
 	router.ServeHTTP(mux, "/neo/")
 	return httptest.NewServer(mux)

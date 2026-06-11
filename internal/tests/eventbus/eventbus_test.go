@@ -1,4 +1,4 @@
-package router_test
+package eventbus
 
 import (
 	"context"
@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"github.com/Protocol-Lattice/neo/internal/broker"
+	routest "github.com/Protocol-Lattice/neo/internal/tests"
 )
 
 func TestRouterUseEvents(t *testing.T) {
 	custom := broker.NewEventBus()
-	router := NewRouter()
+	router := routest.NewRouter()
 	router.UseEvents(custom)
 
 	if got := router.Events(); got != custom {
@@ -34,7 +35,7 @@ func TestRouterUseEvents(t *testing.T) {
 }
 
 func TestRouterUseEventsNilRestoresDefault(t *testing.T) {
-	router := NewRouter()
+	router := routest.NewRouter()
 	router.UseEvents(nil)
 
 	if router.Events() == nil {

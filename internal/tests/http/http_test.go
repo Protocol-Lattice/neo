@@ -1,4 +1,4 @@
-package router_test
+package http
 
 import (
 	"context"
@@ -9,11 +9,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	routest "github.com/Protocol-Lattice/neo/internal/tests"
 )
 
 func TestPlainErrorDefaultsToInternalAndRedactsMessage(t *testing.T) {
-	router := NewRouter()
-	router.Register("boom", Query(func(context.Context, struct{}) (string, error) {
+	router := routest.NewRouter()
+	router.Register("boom", routest.Query(func(context.Context, struct{}) (string, error) {
 		return "", errors.New("pq: connection refused to 10.0.0.5")
 	}))
 
@@ -31,19 +33,19 @@ func TestPlainErrorDefaultsToInternalAndRedactsMessage(t *testing.T) {
 		t.Fatalf("internal detail leaked: %s", rec.Body.String())
 	}
 
-	var res Response
+	var res routest.Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Code != string(CodeInternal) || res.Error != internalErrorMessage {
+	if res.Code != string(routest.CodeInternal) || res.Error != routest.InternalErrorMessage {
 		t.Fatalf("response = %#v, want redacted internal error", res)
 	}
 }
 
 func TestExplicitErrorMessagePassesThroughForNonInternalCode(t *testing.T) {
-	router := NewRouter()
-	router.Register("missing", Query(func(context.Context, struct{}) (string, error) {
-		return "", NewError(CodeNotFound, "user not found")
+	router := routest.NewRouter()
+	router.Register("missing", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "", routest.NewError(routest.CodeNotFound, "user not found")
 	}))
 
 	mux := http.NewServeMux()
@@ -62,8 +64,8 @@ func TestExplicitErrorMessagePassesThroughForNonInternalCode(t *testing.T) {
 }
 
 func TestOptionsPreflightAndHeadAreAccepted(t *testing.T) {
-	router := NewRouter()
-	router.Register("ping", Query(func(context.Context, struct{}) (string, error) {
+	router := routest.NewRouter()
+	router.Register("ping", routest.Query(func(context.Context, struct{}) (string, error) {
 		return "pong", nil
 	}))
 
@@ -94,15 +96,15 @@ func TestQueryAcceptsPostBodyForLargeInputs(t *testing.T) {
 		Value string `json:"value"`
 	}
 
-	router := NewRouter()
-	router.Register("echo", Query(func(_ context.Context, in input) (int, error) {
+	router := routest.NewRouter()
+	router.Register("echo", routest.Query(func(_ context.Context, in input) (int, error) {
 		return len(in.Value), nil
 	}))
 
 	mux := http.NewServeMux()
 	router.ServeHTTP(mux, "/neo/")
 
-	body := `{"input":{"value":"` + strings.Repeat("x", largeGETInputBytes+1) + `"}}`
+	body := `{"input":{"value":"` + strings.Repeat("x", routest.LargeGETInputBytes+1) + `"}}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/neo/echo", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -113,19 +115,71 @@ func TestQueryAcceptsPostBodyForLargeInputs(t *testing.T) {
 	}
 }
 
+func TestMethodEnforcement(t *testing.T) {
+	router := routest.NewRouter()
+	router.Register("q", routest.Query[routest.Input, routest.Output](func(ctx context.Context, in routest.Input) (routest.Output, error) {
+		return routest.Output{Message: "query ok"}, nil
+	}))
+	router.Register("m", routest.Mutation[routest.Input, routest.Output](func(ctx context.Context, in routest.Input) (routest.Output, error) {
+		return routest.Output{Message: "mutation ok"}, nil
+	}))
+
+	server := routest.NewTestServer(router)
+	defer server.Close()
+
+	// Mutation over GET is rejected.
+	res, err := http.Get(server.URL + "/neo/m")
+	if err != nil {
+		t.Fatalf("GET mutation: %v", err)
+	}
+	if err := res.Body.Close(); err != nil {
+		t.Fatalf("close response body: %v", err)
+	}
+
+	if res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("mutation-over-GET status = %d, want 405", res.StatusCode)
+	}
+
+	if allow := res.Header.Get("Allow"); allow != "POST, OPTIONS" {
+		t.Fatalf("Allow = %q, want POST, OPTIONS", allow)
+	}
+
+	// Query over POST is allowed so large query inputs can avoid URL length limits.
+	res, err = http.Post(server.URL+"/neo/q", "application/json", strings.NewReader(`{"input":{}}`))
+	if err != nil {
+		t.Fatalf("POST query: %v", err)
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("query-over-POST status = %d, want 200", res.StatusCode)
+	}
+
+	var got routest.Response
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got.Error != "" || got.Code != "" {
+		t.Fatalf("unexpected error response: %#v", got)
+	}
+}
+
 func TestMergeCopiesProceduresSubscriptionsMetadataAndMiddleware(t *testing.T) {
 	var calls atomic.Int64
-	parent := NewRouter()
-	parent.Use(func(next Handler) Handler {
+	parent := routest.NewRouter()
+	parent.Use(func(next routest.Handler) routest.Handler {
 		return func(ctx context.Context, input any) (any, error) {
 			calls.Add(1)
 			return next(ctx, input)
 		}
 	})
 
-	child := NewRouter()
-	child.Register("ping", Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
-	child.RegisterSubscription("events", Subscription(func(ctx context.Context, _ struct{}) (<-chan string, error) {
+	child := routest.NewRouter()
+	child.Register("ping", routest.Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
+	child.RegisterSubscription("events", routest.Subscription(func(ctx context.Context, _ struct{}) (<-chan string, error) {
 		ch := make(chan string, 1)
 		ch <- "ok"
 		close(ch)
@@ -156,132 +210,21 @@ func TestMergeCopiesProceduresSubscriptionsMetadataAndMiddleware(t *testing.T) {
 	}
 }
 
-func TestMetadataReturnsStableKeyOrder(t *testing.T) {
-	router := NewRouter()
-	router.Register("zeta", Query(func(context.Context, struct{}) (string, error) { return "", nil }))
-	router.Register("alpha", Query(func(context.Context, struct{}) (string, error) { return "", nil }))
-	router.RegisterSubscription("events", Subscription(func(context.Context, struct{}) (<-chan string, error) {
-		ch := make(chan string)
-		close(ch)
-		return ch, nil
-	}))
-
-	metas := router.Metadata()
-	got := make([]string, 0, len(metas))
-	for _, meta := range metas {
-		got = append(got, meta.Key)
-	}
-
-	want := []string{"alpha", "events", "zeta"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("metadata keys = %#v, want %#v", got, want)
-	}
-}
-
-func TestMetadataEndpointReturnsProcedureMetadata(t *testing.T) {
-	router := NewRouter()
-	router.Register("zeta", Query(func(context.Context, struct{}) (string, error) { return "", nil }))
-	router.Register("alpha", Mutation(func(context.Context, testInput) (testOutput, error) {
-		return testOutput{}, nil
-	}))
-	router.RegisterSubscription("events", Subscription(func(context.Context, struct{}) (<-chan string, error) {
-		ch := make(chan string)
-		close(ch)
-		return ch, nil
-	}))
-
-	mux := http.NewServeMux()
-	router.ServeHTTP(mux, "/neo/")
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/neo/"+MetadataPath, nil)
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	var metadata []ProcedureMeta
-	if err := json.Unmarshal(rec.Body.Bytes(), &metadata); err != nil {
-		t.Fatalf("decode metadata: %v", err)
-	}
-	if len(metadata) != 3 {
-		t.Fatalf("metadata len = %d, want 3", len(metadata))
-	}
-
-	got := []string{metadata[0].Key, metadata[1].Key, metadata[2].Key}
-	want := []string{"alpha", "events", "zeta"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("metadata keys = %#v, want %#v", got, want)
-	}
-	if metadata[0].Kind != ProcedureKindMutation {
-		t.Fatalf("alpha kind = %q, want mutation", metadata[0].Kind)
-	}
-}
-
-func TestMetadataEndpointRejectsUnsupportedMethods(t *testing.T) {
-	router := NewRouter()
-	router.Register("ping", Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
-
-	mux := http.NewServeMux()
-	router.ServeHTTP(mux, "/neo/")
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/neo/"+MetadataPath, nil)
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Allow"); got != "GET, HEAD, OPTIONS" {
-		t.Fatalf("allow = %q, want GET, HEAD, OPTIONS", got)
-	}
-}
-
-func TestNilRegistrationRemovesMetadata(t *testing.T) {
-	router := NewRouter()
-	router.Register("ping", Query(func(context.Context, struct{}) (string, error) {
-		return "pong", nil
-	}))
-	router.Register("ping", nil)
-
-	if router.Method("ping") != nil {
-		t.Fatal("method = non-nil, want nil")
-	}
-	if got := router.Metadata(); len(got) != 0 {
-		t.Fatalf("metadata = %#v, want empty", got)
-	}
-
-	router.RegisterSubscription("events", Subscription(func(context.Context, struct{}) (<-chan string, error) {
-		ch := make(chan string)
-		close(ch)
-		return ch, nil
-	}))
-	router.RegisterSubscription("events", nil)
-
-	if router.Subscription("events") != nil {
-		t.Fatal("subscription = non-nil, want nil")
-	}
-	if got := router.Metadata(); len(got) != 0 {
-		t.Fatalf("metadata = %#v, want empty", got)
-	}
-}
-
 func TestServerOptionsDefaultsNonPositiveMaxRequestBody(t *testing.T) {
-	opts := ServerOptionsWithDefaults(ServerOptions{MaxRequestBody: -1})
-	if opts.MaxRequestBody != DefaultMaxRequestBody {
-		t.Fatalf("MaxRequestBody = %d, want %d", opts.MaxRequestBody, DefaultMaxRequestBody)
+	opts := routest.ServerOptionsWithDefaults(routest.ServerOptions{MaxRequestBody: -1})
+	if opts.MaxRequestBody != routest.DefaultMaxRequestBody {
+		t.Fatalf("MaxRequestBody = %d, want %d", opts.MaxRequestBody, routest.DefaultMaxRequestBody)
 	}
 }
 
 func TestUseCORSRestrictsOriginsAndCredentials(t *testing.T) {
-	router := NewRouter()
-	router.UseCORS(CORSOptions{
+	router := routest.NewRouter()
+	router.UseCORS(routest.CORSOptions{
 		AllowedOrigins:   []string{"https://app.example"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Trace-ID"},
 		AllowCredentials: true,
 	})
-	router.Register("ping", Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
+	router.Register("ping", routest.Query(func(context.Context, struct{}) (string, error) { return "pong", nil }))
 
 	mux := http.NewServeMux()
 	router.ServeHTTP(mux, "/neo/")
