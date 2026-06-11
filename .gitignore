@@ -3,3 +3,5 @@
 .specify
 .agents
 skills-lock.json
+# Added by code-review-graph
+.code-review-graph/
