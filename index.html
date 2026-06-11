@@ -5,26 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Neo is a lightweight, type-friendly, tRPC-style RPC framework for Go backends."
+      content="Neo is a lightweight, type-friendly RPC framework for Go backends."
     >
     <title>Neo - Type-Friendly RPC for Go</title>
     <style>
       :root {
         color-scheme: dark;
-        --ink: #f5f2e9;
-        --muted: #b7b2a7;
-        --dim: #837f77;
-        --paper: #10110f;
-        --panel: #181916;
-        --panel-2: #22231e;
-        --line: rgba(245, 242, 233, 0.13);
-        --line-strong: rgba(245, 242, 233, 0.24);
-        --green: #64f29a;
-        --green-2: #1fd170;
-        --amber: #f4bf5f;
-        --coral: #ff7b6f;
-        --blue: #86b7ff;
-        --shadow: rgba(0, 0, 0, 0.45);
+        --bg: #090a0b;
+        --ink: #f6f1e8;
+        --muted: #ada69a;
+        --soft: #6f6a62;
+        --line: rgba(246, 241, 232, 0.14);
+        --line-strong: rgba(246, 241, 232, 0.25);
+        --panel: rgba(17, 19, 20, 0.82);
+        --panel-solid: #111314;
+        --acid: #8cff7a;
+        --acid-2: #35e86e;
+        --cyan: #6fd4ff;
+        --rose: #ff6f8f;
+        --gold: #ffd36b;
+        --shadow: rgba(0, 0, 0, 0.5);
         --max: 1180px;
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
@@ -45,23 +45,25 @@
         margin: 0;
         min-width: 320px;
         background:
-          linear-gradient(180deg, rgba(100, 242, 154, 0.07), transparent 430px),
-          radial-gradient(circle at 70% 24%, rgba(244, 191, 95, 0.08), transparent 280px),
-          var(--paper);
+          linear-gradient(180deg, rgba(12, 17, 16, 0), var(--bg) 720px),
+          radial-gradient(circle at 78% 8%, rgba(140, 255, 122, 0.22), transparent 330px),
+          radial-gradient(circle at 20% 28%, rgba(111, 212, 255, 0.12), transparent 320px),
+          radial-gradient(circle at 80% 88%, rgba(255, 111, 143, 0.1), transparent 350px),
+          var(--bg);
         color: var(--ink);
       }
 
       body::before {
         position: fixed;
         inset: 0;
-        z-index: -1;
+        z-index: -2;
         pointer-events: none;
         content: "";
         background-image:
-          linear-gradient(rgba(245, 242, 233, 0.035) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(245, 242, 233, 0.035) 1px, transparent 1px);
+          linear-gradient(rgba(246, 241, 232, 0.032) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(246, 241, 232, 0.032) 1px, transparent 1px);
         background-size: 72px 72px;
-        mask-image: linear-gradient(to bottom, black, transparent 72%);
+        mask-image: linear-gradient(to bottom, black 0%, transparent 76%);
       }
 
       a {
@@ -69,33 +71,52 @@
         text-decoration: none;
       }
 
-      button,
-      input,
-      textarea,
-      select {
+      button {
         font: inherit;
       }
 
-      .site-header {
+      .skip-link {
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 10;
+        left: 16px;
+        top: 16px;
+        z-index: 100;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--ink);
+        color: #090a0b;
+        transform: translateY(-140%);
+      }
+
+      .skip-link:focus {
+        transform: translateY(0);
+      }
+
+      .site-header {
+        position: fixed;
+        inset: 18px 0 auto;
+        z-index: 20;
+        width: min(100% - 40px, var(--max));
+        margin: 0 auto;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 24px;
-        width: min(100% - 48px, var(--max));
-        height: 76px;
-        margin: 0 auto;
+        gap: 20px;
+        padding: 10px 12px;
+        border: 1px solid rgba(246, 241, 232, 0.12);
+        border-radius: 999px;
+        background: rgba(9, 10, 11, 0.72);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
+        backdrop-filter: blur(18px);
       }
 
       .brand-link {
         display: inline-flex;
         align-items: center;
-        gap: 12px;
-        font-weight: 800;
+        min-width: 0;
+        gap: 10px;
+        padding-left: 4px;
+        font-weight: 850;
       }
 
       .mark {
@@ -103,56 +124,96 @@
         width: 34px;
         height: 34px;
         place-items: center;
-        border: 1px solid rgba(100, 242, 154, 0.55);
-        border-radius: 8px;
-        background: #121511;
-        color: var(--green);
-        box-shadow: 0 0 24px rgba(100, 242, 154, 0.18);
+        border: 1px solid rgba(140, 255, 122, 0.58);
+        border-radius: 50%;
+        background: #101512;
+        color: var(--acid);
+        box-shadow: 0 0 24px rgba(140, 255, 122, 0.26);
       }
 
       .nav {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 2px;
         color: var(--muted);
         font-size: 0.9rem;
       }
 
       .nav a {
         padding: 10px 12px;
-        border-radius: 6px;
-        transition: color 160ms ease, background 160ms ease;
+        border-radius: 999px;
+        transition: background 160ms ease, color 160ms ease;
       }
 
       .nav a:hover,
       .nav a:focus-visible {
-        background: rgba(245, 242, 233, 0.08);
+        background: rgba(246, 241, 232, 0.08);
         color: var(--ink);
         outline: none;
       }
 
+      .header-action {
+        min-height: 36px;
+        padding: 0 14px;
+        border: 1px solid rgba(140, 255, 122, 0.5);
+        border-radius: 999px;
+        color: var(--acid);
+        font-size: 0.9rem;
+      }
+
+      main {
+        overflow: clip;
+      }
+
       .hero {
         position: relative;
+        min-height: 100svh;
+        padding: 128px 0 44px;
         display: grid;
-        min-height: calc(100svh - 120px);
-        overflow: hidden;
-        padding: 88px 0 28px;
+        align-items: center;
         border-bottom: 1px solid var(--line);
       }
 
+      .hero::before {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        content: "";
+        background:
+          linear-gradient(90deg, rgba(9, 10, 11, 0.92) 0%, rgba(9, 10, 11, 0.56) 44%, rgba(9, 10, 11, 0.92) 100%),
+          url("https://github.com/user-attachments/assets/8f0fce3d-d34b-4771-afc1-7d0ea4c5d533");
+        background-position: center right 7%;
+        background-repeat: no-repeat;
+        background-size: min(48vw, 580px);
+        opacity: 0.55;
+        filter: saturate(1.15) contrast(1.05);
+      }
+
+      .hero::after {
+        position: absolute;
+        inset: auto 0 0;
+        height: 210px;
+        pointer-events: none;
+        content: "";
+        background: linear-gradient(to bottom, transparent, var(--bg));
+      }
+
       .hero-inner {
-        display: grid;
-        grid-template-columns: minmax(0, 0.85fr) minmax(440px, 1.15fr);
-        gap: 56px;
-        align-items: center;
+        position: relative;
+        z-index: 1;
         width: min(100% - 48px, var(--max));
         margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+        gap: 52px;
+        align-items: center;
       }
 
       .hero-copy {
         min-width: 0;
-        max-width: 560px;
-        animation: rise 650ms ease both;
+        max-width: 620px;
+        animation: rise 700ms ease both;
       }
 
       .eyebrow {
@@ -160,16 +221,16 @@
         align-items: center;
         gap: 10px;
         margin: 0 0 18px;
-        color: var(--green);
+        color: var(--acid);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.84rem;
+        font-size: 0.82rem;
       }
 
       .eyebrow::before {
-        width: 24px;
+        width: 30px;
         height: 1px;
         content: "";
-        background: var(--green);
+        background: linear-gradient(90deg, transparent, var(--acid));
       }
 
       h1,
@@ -180,25 +241,27 @@
       }
 
       h1 {
-        margin-bottom: 22px;
-        font-size: 5rem;
-        line-height: 0.92;
+        max-width: 660px;
+        margin-bottom: 24px;
+        font-size: clamp(4.4rem, 13vw, 9.7rem);
+        line-height: 0.78;
+        letter-spacing: 0;
       }
 
-      .hero-copy h1 span {
+      .hero-title-small {
         display: block;
-        color: var(--muted);
-        font-size: 2.25rem;
-        font-weight: 700;
-        line-height: 1.05;
+        margin-top: 18px;
+        color: rgba(246, 241, 232, 0.76);
+        font-size: clamp(1.35rem, 4vw, 2.8rem);
+        line-height: 1.04;
       }
 
       .lead {
-        max-width: 530px;
-        margin-bottom: 30px;
+        max-width: 560px;
+        margin-bottom: 32px;
         color: var(--muted);
-        font-size: 1.18rem;
-        line-height: 1.65;
+        font-size: clamp(1.02rem, 2vw, 1.22rem);
+        line-height: 1.64;
       }
 
       .actions {
@@ -210,58 +273,62 @@
 
       .button {
         display: inline-flex;
-        min-height: 46px;
+        min-height: 48px;
         align-items: center;
         justify-content: center;
+        gap: 8px;
         border: 1px solid var(--line-strong);
-        border-radius: 6px;
+        border-radius: 999px;
         padding: 0 18px;
-        background: rgba(245, 242, 233, 0.07);
+        background: rgba(246, 241, 232, 0.07);
         color: var(--ink);
         cursor: pointer;
         transition:
-          transform 160ms ease,
-          border-color 160ms ease,
-          background 160ms ease,
-          color 160ms ease;
+          transform 180ms ease,
+          border-color 180ms ease,
+          background 180ms ease,
+          color 180ms ease,
+          box-shadow 180ms ease;
       }
 
       .button.primary {
-        border-color: rgba(100, 242, 154, 0.7);
-        background: var(--green);
-        color: #09100b;
-        font-weight: 800;
+        border-color: rgba(140, 255, 122, 0.72);
+        background: var(--acid);
+        color: #061008;
+        font-weight: 850;
+        box-shadow: 0 14px 40px rgba(140, 255, 122, 0.16);
       }
 
       .button:hover,
       .button:focus-visible {
-        border-color: rgba(100, 242, 154, 0.72);
-        background: rgba(100, 242, 154, 0.13);
-        color: var(--green);
+        border-color: rgba(140, 255, 122, 0.72);
+        background: rgba(140, 255, 122, 0.13);
+        color: var(--acid);
         outline: none;
         transform: translateY(-2px);
       }
 
       .button.primary:hover,
       .button.primary:focus-visible {
-        background: #7dffad;
-        color: #09100b;
+        background: #a6ff95;
+        color: #061008;
       }
 
-      .install-row {
+      .install {
         display: flex;
-        max-width: 560px;
+        max-width: 580px;
         margin-top: 26px;
         border: 1px solid var(--line);
-        border-radius: 8px;
+        border-radius: 12px;
         overflow: hidden;
-        background: rgba(24, 25, 22, 0.84);
+        background: rgba(10, 12, 13, 0.76);
+        box-shadow: inset 0 1px 0 rgba(246, 241, 232, 0.04);
       }
 
-      .install-row code {
+      .install code {
         flex: 1;
         min-width: 0;
-        padding: 14px 16px;
+        padding: 15px 16px;
         color: var(--ink);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.88rem;
@@ -274,72 +341,55 @@
         border: 0;
         border-left: 1px solid var(--line);
         padding: 0 16px;
-        background: rgba(245, 242, 233, 0.04);
+        background: rgba(246, 241, 232, 0.04);
         color: var(--muted);
         cursor: pointer;
       }
 
       .copy-button:hover,
       .copy-button:focus-visible {
-        color: var(--green);
+        color: var(--acid);
         outline: none;
       }
 
       .hero-stage {
         position: relative;
         min-width: 0;
-        animation: rise 760ms 110ms ease both;
+        animation: rise 780ms 120ms ease both;
       }
 
-      .signal-rail {
+      .hero-stage::before {
         position: absolute;
-        inset: 8% auto 8% -34px;
-        width: 1px;
-        background: linear-gradient(to bottom, transparent, var(--green), transparent);
-        opacity: 0.75;
-      }
-
-      .signal-rail::before,
-      .signal-rail::after {
-        position: absolute;
-        left: -4px;
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
+        inset: -26px;
+        z-index: -1;
+        border: 1px solid rgba(140, 255, 122, 0.12);
+        border-radius: 28px;
         content: "";
-        background: var(--green);
-        box-shadow: 0 0 20px rgba(100, 242, 154, 0.72);
-        animation: pulse 2100ms ease-in-out infinite;
+        background:
+          linear-gradient(135deg, rgba(140, 255, 122, 0.11), transparent 46%),
+          linear-gradient(315deg, rgba(111, 212, 255, 0.1), transparent 44%);
+        filter: blur(0.2px);
       }
 
-      .signal-rail::before {
-        top: 16%;
-      }
-
-      .signal-rail::after {
-        bottom: 24%;
-        animation-delay: 700ms;
-      }
-
-      .terminal {
-        width: 100%;
+      .console {
         min-width: 0;
-        border: 1px solid var(--line-strong);
-        border-radius: 8px;
         overflow: hidden;
-        background: rgba(18, 19, 16, 0.94);
-        box-shadow: 0 26px 80px var(--shadow);
+        border: 1px solid rgba(246, 241, 232, 0.18);
+        border-radius: 20px;
+        background: rgba(14, 16, 17, 0.9);
+        box-shadow: 0 30px 90px var(--shadow);
+        backdrop-filter: blur(18px);
       }
 
-      .terminal-bar {
+      .console-head {
         display: flex;
+        min-height: 48px;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
-        min-height: 46px;
+        gap: 16px;
         padding: 0 16px;
         border-bottom: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.035);
+        background: rgba(246, 241, 232, 0.035);
       }
 
       .traffic {
@@ -354,54 +404,60 @@
       }
 
       .traffic span:nth-child(1) {
-        background: var(--coral);
+        background: var(--rose);
       }
 
       .traffic span:nth-child(2) {
-        background: var(--amber);
+        background: var(--gold);
       }
 
       .traffic span:nth-child(3) {
-        background: var(--green);
+        background: var(--acid);
       }
 
       .file-name {
+        min-width: 0;
         color: var(--muted);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.82rem;
+        font-size: 0.8rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
-      .tab-list {
+      .tabs {
         display: flex;
         gap: 6px;
         padding: 10px 12px 0;
         border-bottom: 1px solid var(--line);
+        overflow-x: auto;
       }
 
       .tab {
+        flex: 0 0 auto;
         border: 1px solid transparent;
         border-bottom: 0;
-        border-radius: 6px 6px 0 0;
-        padding: 9px 12px;
+        border-radius: 10px 10px 0 0;
+        padding: 10px 12px;
         background: transparent;
-        color: var(--dim);
+        color: var(--soft);
         cursor: pointer;
         font-size: 0.84rem;
       }
 
       .tab[aria-selected="true"] {
         border-color: var(--line);
-        background: rgba(245, 242, 233, 0.05);
+        background: rgba(246, 241, 232, 0.055);
         color: var(--ink);
       }
 
       .tab:focus-visible {
-        outline: 2px solid rgba(100, 242, 154, 0.8);
+        outline: 2px solid rgba(140, 255, 122, 0.78);
         outline-offset: -2px;
       }
 
       .code-window {
-        min-height: 370px;
+        min-height: 366px;
         padding: 22px;
       }
 
@@ -416,106 +472,160 @@
       pre {
         margin: 0;
         overflow-x: auto;
-        color: #e7e1d6;
+        color: #efe9dc;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.86rem;
-        line-height: 1.62;
+        line-height: 1.64;
       }
 
-      .token-fn,
-      .token-type {
-        color: var(--green);
+      .fn,
+      .type {
+        color: var(--acid);
       }
 
-      .token-str {
-        color: var(--amber);
+      .str {
+        color: var(--gold);
       }
 
-      .token-key {
-        color: var(--blue);
+      .kw {
+        color: var(--cyan);
       }
 
-      .token-comment {
-        color: #858077;
+      .comment {
+        color: #837d73;
       }
 
-      .stream {
+      .signal-strip {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, 1fr);
         border-top: 1px solid var(--line);
       }
 
-      .stream-item {
+      .signal-item {
         min-width: 0;
-        padding: 16px;
+        padding: 15px 16px;
       }
 
-      .stream-item + .stream-item {
+      .signal-item + .signal-item {
         border-left: 1px solid var(--line);
       }
 
-      .stream-label {
+      .signal-label {
         display: block;
-        margin-bottom: 8px;
-        color: var(--dim);
-        font-size: 0.78rem;
+        margin-bottom: 7px;
+        color: var(--soft);
+        font-size: 0.72rem;
         text-transform: uppercase;
       }
 
-      .stream code {
-        color: var(--green);
+      .signal-item code {
+        color: var(--acid);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.84rem;
-        white-space: normal;
+        font-size: 0.82rem;
+        overflow-wrap: anywhere;
+      }
+
+      .pulse-line {
+        position: absolute;
+        top: 54%;
+        left: -44px;
+        width: 88px;
+        height: 1px;
+        overflow: visible;
+        background: linear-gradient(90deg, transparent, var(--acid), transparent);
+      }
+
+      .pulse-line::after {
+        position: absolute;
+        top: -4px;
+        right: 15px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        content: "";
+        background: var(--acid);
+        box-shadow: 0 0 18px rgba(140, 255, 122, 0.86);
+        animation: ping 1800ms ease-in-out infinite;
       }
 
       .section {
         width: min(100% - 48px, var(--max));
         margin: 0 auto;
-        padding: 92px 0;
+        padding: 96px 0;
       }
 
       .section + .section {
         border-top: 1px solid var(--line);
       }
 
-      .hero + .section {
-        padding-top: 28px;
-      }
-
       .section-kicker {
         margin-bottom: 12px;
-        color: var(--green);
+        color: var(--acid);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.82rem;
+        font-size: 0.8rem;
       }
 
       .section h2 {
-        max-width: 780px;
+        max-width: 820px;
         margin-bottom: 18px;
-        font-size: 3rem;
-        line-height: 1.02;
+        font-size: clamp(2.2rem, 5vw, 4.4rem);
+        line-height: 0.95;
+        letter-spacing: 0;
       }
 
       .section-intro {
-        max-width: 700px;
+        max-width: 720px;
         color: var(--muted);
         font-size: 1.08rem;
-        line-height: 1.7;
+        line-height: 1.68;
+      }
+
+      .marquee {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        overflow: hidden;
+        background: rgba(246, 241, 232, 0.025);
+      }
+
+      .marquee-track {
+        display: flex;
+        width: max-content;
+        animation: scroll 28s linear infinite;
+      }
+
+      .marquee span {
+        display: inline-flex;
+        align-items: center;
+        min-height: 72px;
+        padding: 0 28px;
+        color: rgba(246, 241, 232, 0.72);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.9rem;
+        white-space: nowrap;
+      }
+
+      .marquee span::before {
+        width: 7px;
+        height: 7px;
+        margin-right: 18px;
+        border-radius: 50%;
+        content: "";
+        background: var(--acid);
+        box-shadow: 0 0 16px rgba(140, 255, 122, 0.7);
       }
 
       .workflow {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 0;
-        margin-top: 46px;
+        margin-top: 48px;
         border-top: 1px solid var(--line);
         border-bottom: 1px solid var(--line);
       }
 
       .workflow-step {
-        min-height: 210px;
-        padding: 26px 22px;
+        min-height: 230px;
+        padding: 28px 22px;
       }
 
       .workflow-step + .workflow-step {
@@ -524,8 +634,8 @@
 
       .number {
         display: block;
-        margin-bottom: 32px;
-        color: var(--dim);
+        margin-bottom: 34px;
+        color: var(--soft);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       }
 
@@ -540,121 +650,23 @@
         line-height: 1.62;
       }
 
-      .architecture-layout {
-        display: grid;
-        grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
-        gap: 54px;
-        align-items: start;
-        margin-top: 46px;
-      }
-
-      .architecture-map {
-        min-width: 0;
-        border: 1px solid var(--line-strong);
-        border-radius: 8px;
-        overflow: hidden;
-        background:
-          linear-gradient(135deg, rgba(100, 242, 154, 0.08), transparent 44%),
-          rgba(24, 25, 22, 0.92);
-      }
-
-      .architecture-tier {
-        display: grid;
-        gap: 14px;
-        padding: 20px;
-      }
-
-      .architecture-tier + .architecture-tier {
-        border-top: 1px solid var(--line);
-      }
-
-      .tier-label {
-        color: var(--dim);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.76rem;
-        text-transform: uppercase;
-      }
-
-      .arch-node {
-        min-width: 0;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 16px;
-        background: rgba(245, 242, 233, 0.04);
-      }
-
-      .arch-node strong {
-        display: block;
-        margin-bottom: 8px;
-        color: var(--ink);
-      }
-
-      .arch-node span,
-      .arch-path {
-        color: var(--muted);
-        line-height: 1.55;
-      }
-
-      .arch-node code,
-      .arch-path code {
-        color: var(--green);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.9em;
-      }
-
-      .service-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-      }
-
-      .arch-paths {
-        display: grid;
-        gap: 12px;
-        margin-top: 22px;
-        border-top: 1px solid var(--line);
-        padding-top: 22px;
-      }
-
-      .arch-path {
-        display: grid;
-        grid-template-columns: 110px 1fr;
-        gap: 16px;
-      }
-
-      .arch-path strong {
-        color: var(--ink);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.82rem;
-      }
-
-      .architecture-layout .feature-list {
-        margin-top: 0;
-      }
-
-      .architecture-layout .feature-row {
-        grid-template-columns: 1fr;
-        gap: 8px;
-        padding: 18px 0;
-      }
-
       .split {
         display: grid;
-        grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
-        gap: 64px;
+        grid-template-columns: minmax(0, 0.94fr) minmax(420px, 1.06fr);
+        gap: 58px;
         align-items: start;
       }
 
       .feature-list {
         display: grid;
         gap: 0;
-        margin-top: 30px;
+        margin-top: 34px;
         border-top: 1px solid var(--line);
       }
 
       .feature-row {
         display: grid;
-        grid-template-columns: 190px 1fr;
+        grid-template-columns: 170px 1fr;
         gap: 24px;
         padding: 22px 0;
         border-bottom: 1px solid var(--line);
@@ -669,34 +681,37 @@
         line-height: 1.62;
       }
 
-      .protocol-panel {
+      .route-stack {
         position: sticky;
-        top: 28px;
+        top: 102px;
+        min-width: 0;
         border: 1px solid var(--line-strong);
-        border-radius: 8px;
+        border-radius: 18px;
         overflow: hidden;
         background: var(--panel);
-        box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(14px);
       }
 
-      .protocol-head {
+      .route-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 16px;
+        gap: 14px;
+        padding: 16px 18px;
         border-bottom: 1px solid var(--line);
       }
 
-      .protocol-head strong {
+      .route-head strong {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.85rem;
+        font-size: 0.86rem;
       }
 
       .status {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        color: var(--green);
+        color: var(--acid);
         font-size: 0.82rem;
       }
 
@@ -705,20 +720,20 @@
         height: 8px;
         border-radius: 50%;
         content: "";
-        background: var(--green);
-        box-shadow: 0 0 16px rgba(100, 242, 154, 0.9);
+        background: var(--acid);
+        box-shadow: 0 0 16px rgba(140, 255, 122, 0.9);
       }
 
-      .protocol-body {
-        padding: 18px;
+      .routes {
+        padding: 8px 18px 10px;
       }
 
       .route {
         display: grid;
-        grid-template-columns: 96px 1fr;
+        grid-template-columns: 92px 1fr;
         gap: 12px;
         align-items: center;
-        padding: 14px 0;
+        padding: 15px 0;
         border-bottom: 1px solid var(--line);
       }
 
@@ -728,31 +743,31 @@
 
       .method {
         display: inline-flex;
-        width: 86px;
+        width: 82px;
         min-height: 30px;
         align-items: center;
         justify-content: center;
-        border-radius: 4px;
-        color: #07100a;
+        border-radius: 999px;
+        color: #061008;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.76rem;
-        font-weight: 800;
+        font-size: 0.72rem;
+        font-weight: 850;
       }
 
       .method.get {
-        background: var(--green);
+        background: var(--acid);
       }
 
       .method.post {
-        background: var(--amber);
+        background: var(--gold);
       }
 
       .method.ws {
-        background: var(--blue);
+        background: var(--cyan);
       }
 
       .method.bin {
-        background: var(--coral);
+        background: var(--rose);
       }
 
       .route code {
@@ -762,218 +777,144 @@
         overflow-wrap: anywhere;
       }
 
-      .quickstart {
+      .architecture {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
-        gap: 38px;
-        align-items: stretch;
-        margin-top: 42px;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 0.74fr);
+        gap: 52px;
+        align-items: start;
+        margin-top: 48px;
       }
 
-      .code-card,
-      .note-panel {
+      .architecture-map {
         min-width: 0;
         border: 1px solid var(--line-strong);
-        border-radius: 8px;
-        background: rgba(24, 25, 22, 0.9);
+        border-radius: 18px;
+        overflow: hidden;
+        background:
+          linear-gradient(135deg, rgba(140, 255, 122, 0.08), transparent 46%),
+          rgba(17, 19, 20, 0.76);
       }
 
-      .code-card {
+      .tier {
+        display: grid;
+        gap: 14px;
+        padding: 20px;
+      }
+
+      .tier + .tier {
+        border-top: 1px solid var(--line);
+      }
+
+      .tier-label {
+        color: var(--soft);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.76rem;
+        text-transform: uppercase;
+      }
+
+      .node {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        background: rgba(246, 241, 232, 0.04);
+      }
+
+      .node strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .node span,
+      .path span {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .node code,
+      .path code,
+      .section-intro code,
+      .note code {
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      .service-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .paths {
+        display: grid;
+        gap: 12px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .path {
+        display: grid;
+        grid-template-columns: 94px 1fr;
+        gap: 16px;
+        padding: 18px 0;
+      }
+
+      .path + .path {
+        border-top: 1px solid var(--line);
+      }
+
+      .path strong {
+        color: var(--ink);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+
+      .code-block {
+        min-width: 0;
         overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 18px;
+        background: rgba(17, 19, 20, 0.82);
       }
 
       .code-title {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
-        padding: 15px 18px;
+        gap: 14px;
+        padding: 16px 18px;
         border-bottom: 1px solid var(--line);
         color: var(--muted);
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         font-size: 0.82rem;
       }
 
-      .code-card pre {
+      .code-block pre {
         padding: 22px;
       }
 
-      .note-panel {
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        gap: 32px;
-        padding: 24px;
-      }
-
-      .note-panel p {
-        color: var(--muted);
-        line-height: 1.66;
-      }
-
-      .checks {
+      .transport-grid {
         display: grid;
-        gap: 14px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .checks li {
-        display: flex;
+        grid-template-columns: repeat(4, 1fr);
         gap: 12px;
-        color: var(--ink);
+        margin-top: 44px;
       }
 
-      .checks li::before {
-        flex: 0 0 auto;
-        width: 7px;
-        height: 7px;
-        margin-top: 9px;
-        border-radius: 50%;
-        content: "";
-        background: var(--green);
-      }
-
-      .benchmark-layout {
-        display: grid;
-        grid-template-columns: minmax(0, 0.7fr) minmax(520px, 1.3fr);
-        gap: 54px;
-        align-items: start;
-        margin-top: 46px;
-      }
-
-      .benchmark-summary {
-        display: grid;
-        gap: 0;
+      .transport {
+        min-height: 180px;
         border-top: 1px solid var(--line);
-        border-bottom: 1px solid var(--line);
+        padding: 20px 0 0;
       }
 
-      .benchmark-summary div {
-        padding: 20px 0;
-      }
-
-      .benchmark-summary div + div {
-        border-top: 1px solid var(--line);
-      }
-
-      .benchmark-summary strong {
+      .transport strong {
         display: block;
-        margin-bottom: 8px;
-        color: var(--ink);
-        font-size: 1.7rem;
-        line-height: 1;
+        margin-bottom: 12px;
       }
 
-      .benchmark-summary span {
+      .transport p {
+        margin-bottom: 0;
         color: var(--muted);
-        line-height: 1.55;
-      }
-
-      .benchmark-summary code,
-      .benchmark-note code,
-      .section-intro code {
-        color: var(--ink);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.92em;
-      }
-
-      .benchmark-chart {
-        min-width: 0;
-        border: 1px solid var(--line-strong);
-        border-radius: 8px;
-        overflow: hidden;
-        background: rgba(24, 25, 22, 0.9);
-      }
-
-      .benchmark-chart header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 18px;
-        padding: 17px 18px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .benchmark-chart h3 {
-        margin: 0;
-        font-size: 1rem;
-      }
-
-      .benchmark-chart header span {
-        color: var(--dim);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.78rem;
-        text-align: right;
-      }
-
-      .chart-group {
-        padding: 20px 18px 22px;
-      }
-
-      .chart-group + .chart-group {
-        border-top: 1px solid var(--line);
-      }
-
-      .chart-group h4 {
-        margin: 0 0 16px;
-        color: var(--muted);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.78rem;
-        font-weight: 600;
-        text-transform: uppercase;
-      }
-
-      .bar-row {
-        display: grid;
-        grid-template-columns: 150px minmax(120px, 1fr) 88px;
-        gap: 14px;
-        align-items: center;
-      }
-
-      .bar-row + .bar-row {
-        margin-top: 13px;
-      }
-
-      .bar-label {
-        min-width: 0;
-        color: var(--ink);
-        font-size: 0.92rem;
-      }
-
-      .bar-track {
-        position: relative;
-        height: 28px;
-        overflow: hidden;
-        border-radius: 4px;
-        background: rgba(245, 242, 233, 0.06);
-      }
-
-      .bar {
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: var(--bar-width);
-        background: linear-gradient(90deg, var(--green), rgba(100, 242, 154, 0.5));
-      }
-
-      .bar.grpc {
-        background: linear-gradient(90deg, var(--blue), rgba(134, 183, 255, 0.48));
-      }
-
-      .bar-value {
-        color: var(--muted);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.82rem;
-        text-align: right;
-      }
-
-      .benchmark-note {
-        margin: 0;
-        padding: 16px 18px;
-        border-top: 1px solid var(--line);
-        color: var(--dim);
-        font-size: 0.86rem;
         line-height: 1.6;
       }
 
@@ -982,7 +923,7 @@
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 32px;
         align-items: end;
-        padding-bottom: 110px;
+        padding-bottom: 118px;
       }
 
       .final-cta h2 {
@@ -992,7 +933,7 @@
       .reveal {
         opacity: 0;
         transform: translateY(24px);
-        transition: opacity 600ms ease, transform 600ms ease;
+        transition: opacity 650ms ease, transform 650ms ease;
       }
 
       .reveal.visible {
@@ -1000,7 +941,7 @@
         transform: translateY(0);
       }
 
-      .hero + .section.reveal {
+      .hero + .marquee + .section.reveal {
         opacity: 1;
         transform: none;
       }
@@ -1010,47 +951,57 @@
           opacity: 0;
           transform: translateY(22px);
         }
+
         to {
           opacity: 1;
           transform: translateY(0);
         }
       }
 
-      @keyframes pulse {
+      @keyframes ping {
         0%,
         100% {
           opacity: 0.45;
           transform: scale(0.84);
         }
+
         50% {
           opacity: 1;
           transform: scale(1);
         }
       }
 
-      @media (max-width: 1020px) {
+      @keyframes scroll {
+        from {
+          transform: translateX(0);
+        }
+
+        to {
+          transform: translateX(-50%);
+        }
+      }
+
+      @media (max-width: 1060px) {
         .hero {
           min-height: auto;
-          padding-bottom: 54px;
         }
 
         .hero-inner,
         .split,
-        .quickstart,
-        .architecture-layout,
-        .benchmark-layout {
+        .architecture {
           grid-template-columns: 1fr;
         }
 
         .hero-copy {
-          max-width: 720px;
-        }
-
-        .hero-stage {
           max-width: 760px;
         }
 
-        .workflow {
+        .hero-stage {
+          max-width: 780px;
+        }
+
+        .workflow,
+        .transport-grid {
           grid-template-columns: repeat(2, 1fr);
         }
 
@@ -1062,7 +1013,7 @@
           border-top: 1px solid var(--line);
         }
 
-        .protocol-panel {
+        .route-stack {
           position: static;
         }
 
@@ -1072,18 +1023,31 @@
         }
       }
 
-      @media (max-width: 720px) {
+      @media (max-width: 760px) {
         .site-header {
-          width: min(100% - 32px, var(--max));
-          height: 68px;
+          inset: 12px 0 auto;
+          width: min(100% - 24px, var(--max));
+          padding: 8px;
         }
 
         .nav {
           display: none;
         }
 
+        .header-action {
+          min-height: 34px;
+          padding: 0 12px;
+          font-size: 0.82rem;
+        }
+
         .hero {
-          padding: 78px 0 24px;
+          padding: 102px 0 32px;
+        }
+
+        .hero::before {
+          background-size: 420px;
+          background-position: right -120px top 72px;
+          opacity: 0.36;
         }
 
         .hero-inner,
@@ -1092,15 +1056,7 @@
         }
 
         .hero-inner {
-          gap: 26px;
-        }
-
-        h1 {
-          font-size: 3.05rem;
-        }
-
-        .hero-copy h1 span {
-          font-size: 1.36rem;
+          gap: 32px;
         }
 
         .lead,
@@ -1108,33 +1064,34 @@
           font-size: 1rem;
         }
 
-        .install-row {
+        .actions {
           width: 100%;
-          max-width: 100%;
-          flex-direction: row;
         }
 
-        .install-row code {
+        .button {
+          flex: 1 1 160px;
+        }
+
+        .install {
+          width: 100%;
+        }
+
+        .install code {
           padding: 14px 12px;
-          font-size: 0.74rem;
+          font-size: 0.72rem;
         }
 
         .copy-button {
-          min-height: auto;
-          border-top: 0;
-          border-left: 1px solid var(--line);
           padding: 0 10px;
-          font-size: 0.86rem;
+          font-size: 0.84rem;
         }
 
-        .signal-rail {
+        .pulse-line {
           display: none;
         }
 
-        .terminal-bar {
-          min-height: 42px;
-          align-items: center;
-          flex-direction: row;
+        .console-head {
+          min-height: 44px;
           padding: 0 12px;
         }
 
@@ -1142,49 +1099,43 @@
           font-size: 0.72rem;
         }
 
-        .tab-list {
-          overflow-x: auto;
-        }
-
         .tab {
           padding: 8px 10px;
-          font-size: 0.78rem;
+          font-size: 0.76rem;
         }
 
         .code-window {
-          height: 132px;
-          min-height: 132px;
-          max-height: 132px;
+          height: 190px;
+          min-height: 190px;
           overflow: auto;
           padding: 16px;
         }
 
         pre {
-          font-size: 0.78rem;
+          font-size: 0.76rem;
         }
 
-        .stream {
-          display: none;
+        .signal-strip {
+          grid-template-columns: 1fr;
+        }
+
+        .signal-item + .signal-item {
+          border-top: 1px solid var(--line);
+          border-left: 0;
         }
 
         .section {
-          padding: 70px 0;
+          padding: 72px 0;
         }
 
-        .hero + .section {
-          padding-top: 18px;
-        }
-
-        .section h2 {
-          font-size: 2.2rem;
-        }
-
-        .workflow {
+        .workflow,
+        .transport-grid {
           grid-template-columns: 1fr;
         }
 
         .workflow-step,
         .workflow-step:nth-child(3) {
+          min-height: auto;
           border-left: 0;
         }
 
@@ -1192,52 +1143,20 @@
           border-top: 1px solid var(--line);
         }
 
-        .architecture-layout {
-          gap: 28px;
+        .feature-row,
+        .route,
+        .path {
+          grid-template-columns: 1fr;
+          gap: 10px;
         }
 
         .service-grid {
           grid-template-columns: 1fr;
         }
 
-        .arch-path {
-          grid-template-columns: 1fr;
-          gap: 6px;
-        }
-
-        .feature-row {
-          grid-template-columns: 1fr;
-          gap: 10px;
-        }
-
-        .route {
-          grid-template-columns: 1fr;
-        }
-
-        .quickstart {
-          grid-template-columns: 1fr;
-        }
-
-        .benchmark-chart header {
+        .code-title {
           align-items: flex-start;
           flex-direction: column;
-        }
-
-        .benchmark-chart header span {
-          text-align: left;
-        }
-
-        .bar-row {
-          grid-template-columns: 1fr;
-          gap: 8px;
-        }
-
-        .bar-track {
-          height: 24px;
-        }
-
-        .bar-value {
-          text-align: left;
         }
       }
 
@@ -1259,18 +1178,20 @@
     </style>
   </head>
   <body>
-    <header class="site-header" aria-label="Primary">
+    <a class="skip-link" href="#workflow">Skip to content</a>
+
+    <header class="site-header" aria-label="Primary navigation">
       <a class="brand-link" href="#top" aria-label="Neo home">
         <span class="mark" aria-hidden="true">N</span>
         <span>Neo</span>
       </a>
       <nav class="nav" aria-label="Page sections">
         <a href="#workflow">Workflow</a>
-        <a href="#architecture">Architecture</a>
         <a href="#protocol">Protocol</a>
-        <a href="#benchmarks">Benchmarks</a>
-        <a href="#quickstart">Quick start</a>
+        <a href="#gateway">Gateway</a>
+        <a href="#codegen">Codegen</a>
       </nav>
+      <a class="header-action" href="#install">Install</a>
     </header>
 
     <main id="top">
@@ -1278,17 +1199,19 @@
         <div class="hero-inner">
           <div class="hero-copy">
             <p class="eyebrow">github.com/Protocol-Lattice/neo</p>
-            <h1 id="hero-title">Neo <span>Type-friendly RPC for Go backends.</span></h1>
+            <h1 id="hero-title">
+              Neo
+              <span class="hero-title-small">Type-friendly RPC for Go backends.</span>
+            </h1>
             <p class="lead">
-              Build procedure-based APIs with queries, mutations, subscriptions,
-              middleware, nested routers, generated clients, and a tiny Go-first
-              mental model.
+              Ship procedure-based APIs with queries, mutations, subscriptions,
+              middleware, generated clients, and one small Go-first mental model.
             </p>
             <div class="actions">
-              <a class="button primary" href="#quickstart">Start building</a>
-              <a class="button" href="#protocol">See the protocol</a>
+              <a class="button primary" href="#install">Start building</a>
+              <a class="button" href="#protocol">See protocol</a>
             </div>
-            <div class="install-row" aria-label="Install command">
+            <div class="install" aria-label="Install command">
               <code id="install-command">go get github.com/Protocol-Lattice/neo</code>
               <button class="copy-button" type="button" data-copy="#install-command">
                 Copy
@@ -1297,9 +1220,9 @@
           </div>
 
           <div class="hero-stage" aria-label="Neo router code sample">
-            <div class="signal-rail" aria-hidden="true"></div>
-            <div class="terminal">
-              <div class="terminal-bar">
+            <div class="pulse-line" aria-hidden="true"></div>
+            <div class="console">
+              <div class="console-head">
                 <div class="traffic" aria-hidden="true">
                   <span></span>
                   <span></span>
@@ -1307,7 +1230,7 @@
                 </div>
                 <span class="file-name">internal/api/router.go</span>
               </div>
-              <div class="tab-list" role="tablist" aria-label="Procedure examples">
+              <div class="tabs" role="tablist" aria-label="Procedure examples">
                 <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="pane-query" id="tab-query" data-tab="query">
                   Query
                 </button>
@@ -1320,51 +1243,55 @@
               </div>
               <div class="code-window">
                 <div class="code-pane active" id="pane-query" role="tabpanel" aria-labelledby="tab-query" data-pane="query">
-<pre><code>router := <span class="token-fn">neo.NewRouter</span>()
+<pre><code>router := <span class="fn">neo.NewRouter</span>()
 
-router.Register(<span class="token-str">"user.get"</span>, <span class="token-fn">neo.Query</span>(
-  func(ctx context.Context, in <span class="token-type">GetUserInput</span>) (<span class="token-type">User</span>, error) {
+router.Register(<span class="str">"user.get"</span>, <span class="fn">neo.Query</span>(
+  func(ctx context.Context, in <span class="type">GetUserInput</span>) (<span class="type">User</span>, error) {
     return db.GetUser(ctx, in.ID)
   },
 ))
 
 router.ListenAndServe(neo.ServerOptions{
-  Addr:   <span class="token-str">":8080"</span>,
-  Prefix: <span class="token-str">"/neo/"</span>,
+  Addr:   <span class="str">":8080"</span>,
+  Prefix: <span class="str">"/neo/"</span>,
 })</code></pre>
                 </div>
                 <div class="code-pane" id="pane-mutation" role="tabpanel" aria-labelledby="tab-mutation" data-pane="mutation">
-<pre><code>router.Register(<span class="token-str">"user.create"</span>, <span class="token-fn">neo.Mutation</span>(
-  func(ctx context.Context, in <span class="token-type">CreateUserInput</span>) (<span class="token-type">User</span>, error) {
+<pre><code>router.Register(<span class="str">"user.create"</span>, <span class="fn">neo.Mutation</span>(
+  func(ctx context.Context, in <span class="type">CreateUserInput</span>) (<span class="type">User</span>, error) {
     user, err := db.CreateUser(ctx, in.Name)
     if err != nil {
-      return <span class="token-type">User</span>{}, err
+      return <span class="type">User</span>{}, err
     }
 
-    router.Events().Publish(<span class="token-str">"user.changes"</span>, user)
+    router.Events().Publish(<span class="str">"user.changes"</span>, user)
     return user, nil
   },
 ))</code></pre>
                 </div>
                 <div class="code-pane" id="pane-subscription" role="tabpanel" aria-labelledby="tab-subscription" data-pane="subscription">
-<pre><code>router.RegisterSubscription(<span class="token-str">"user.changes"</span>, <span class="token-fn">neo.Subscription</span>(
-  func(ctx context.Context, in <span class="token-type">NoInput</span>) (&lt;-chan <span class="token-type">UserEvent</span>, error) {
-    raw := router.Events().Subscribe(ctx, <span class="token-str">"user.changes"</span>)
-    return mapEvents[<span class="token-type">UserEvent</span>](ctx, raw), nil
+<pre><code>router.RegisterSubscription(<span class="str">"user.changes"</span>, <span class="fn">neo.Subscription</span>(
+  func(ctx context.Context, in <span class="type">NoInput</span>) (&lt;-chan <span class="type">UserEvent</span>, error) {
+    raw := router.Events().Subscribe(ctx, <span class="str">"user.changes"</span>)
+    return mapEvents[<span class="type">UserEvent</span>](ctx, raw), nil
   },
 ))
 
-<span class="token-comment">// NDJSON or WebSocket clients receive the same envelope.</span></code></pre>
+<span class="comment">// NDJSON and WebSocket use the same envelope.</span></code></pre>
                 </div>
               </div>
-              <div class="stream" aria-label="Request and response examples">
-                <div class="stream-item">
-                  <span class="stream-label">Request</span>
+              <div class="signal-strip" aria-label="Request examples">
+                <div class="signal-item">
+                  <span class="signal-label">Request</span>
                   <code>GET /neo/user.get?input={"id":1}</code>
                 </div>
-                <div class="stream-item">
-                  <span class="stream-label">Response</span>
-                  <code>{"result":{"id":1,"name":"Neo"}}</code>
+                <div class="signal-item">
+                  <span class="signal-label">Response</span>
+                  <code>{"result":{"id":1}}</code>
+                </div>
+                <div class="signal-item">
+                  <span class="signal-label">Client</span>
+                  <code>client.User.GetByID.Query(ctx, input)</code>
                 </div>
               </div>
             </div>
@@ -1372,153 +1299,94 @@ router.ListenAndServe(neo.ServerOptions{
         </div>
       </section>
 
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee-track">
+          <span>query</span>
+          <span>mutation</span>
+          <span>subscription</span>
+          <span>middleware</span>
+          <span>metadata</span>
+          <span>neo-gen</span>
+          <span>gateway</span>
+          <span>binary codec</span>
+          <span>query</span>
+          <span>mutation</span>
+          <span>subscription</span>
+          <span>middleware</span>
+          <span>metadata</span>
+          <span>neo-gen</span>
+          <span>gateway</span>
+          <span>binary codec</span>
+        </div>
+      </div>
+
       <section class="section reveal" id="workflow" aria-labelledby="workflow-title">
-        <p class="section-kicker">One router, three procedure kinds</p>
-        <h2 id="workflow-title">Keep the backend shape close to the product shape.</h2>
+        <p class="section-kicker">Procedure-first backend design</p>
+        <h2 id="workflow-title">The API stays shaped like the thing you are building.</h2>
         <p class="section-intro">
-          Neo organizes application behavior around typed procedures instead of
-          scattered route handlers. Register the operation once, then call it
-          from Go, generated Go clients, or generated TypeScript clients.
+          Neo keeps product operations as named typed procedures. Register once,
+          compose with Go functions, then call the same surface from raw clients,
+          generated Go clients, or generated TypeScript clients.
         </p>
         <div class="workflow">
           <article class="workflow-step">
             <span class="number">01</span>
             <h3>Register</h3>
-            <p>Define query, mutation, and subscription handlers with typed inputs and outputs.</p>
+            <p>Queries, mutations, and subscriptions are ordinary typed Go handlers.</p>
           </article>
           <article class="workflow-step">
             <span class="number">02</span>
             <h3>Compose</h3>
-            <p>Use middleware, nested routers, and router merge to grow APIs by module.</p>
+            <p>Use middleware, nested routers, and merge to grow by module.</p>
           </article>
           <article class="workflow-step">
             <span class="number">03</span>
             <h3>Serve</h3>
-            <p>Mount Neo into your mux or run it with hardened server options.</p>
+            <p>Mount into your mux or run Neo with hardened server options.</p>
           </article>
           <article class="workflow-step">
             <span class="number">04</span>
             <h3>Generate</h3>
-            <p>Use metadata and neo-gen for typed Go and TypeScript client surfaces.</p>
+            <p>Use metadata to emit typed Go clients, TypeScript clients, docs, and schema.</p>
           </article>
-        </div>
-      </section>
-
-      <section class="section reveal" id="architecture" aria-labelledby="architecture-title">
-        <p class="section-kicker">Microservices without a second API model</p>
-        <h2 id="architecture-title">One public gateway, independently owned services.</h2>
-        <p class="section-intro">
-          Neo routers can be mounted locally for modular monoliths or proxied
-          through a gateway when users, orders, and auth live in separate
-          processes. Metadata keeps the generated client shaped like the full
-          system.
-        </p>
-        <div class="architecture-layout">
-          <div class="architecture-map" aria-label="Neo microservices architecture">
-            <div class="architecture-tier">
-              <span class="tier-label">Clients</span>
-              <div class="arch-node">
-                <strong>Go and TypeScript clients</strong>
-                <span>Generated namespaces call <code>users.getByID</code>, <code>orders.create</code>, and <code>auth.me</code>.</span>
-              </div>
-            </div>
-            <div class="architecture-tier">
-              <span class="tier-label">Gateway</span>
-              <div class="arch-node">
-                <strong><code>/neo</code> public API</strong>
-                <span>Prefixes metadata, forwards headers, and strips service keys before proxying upstream.</span>
-              </div>
-            </div>
-            <div class="architecture-tier">
-              <span class="tier-label">Services</span>
-              <div class="service-grid">
-                <div class="arch-node">
-                  <strong>users</strong>
-                  <span><code>getByID</code></span>
-                </div>
-                <div class="arch-node">
-                  <strong>orders</strong>
-                  <span><code>create</code></span>
-                </div>
-                <div class="arch-node">
-                  <strong>auth</strong>
-                  <span><code>login</code> / <code>me</code></span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div>
-            <div class="feature-list">
-              <div class="feature-row">
-                <strong>Local mount</strong>
-                <span>Attach routers in-process when a service boundary is organizational, not operational.</span>
-              </div>
-              <div class="feature-row">
-                <strong>Remote proxy</strong>
-                <span>Expose service-prefixed procedures while each upstream still owns its local keys.</span>
-              </div>
-              <div class="feature-row">
-                <strong>Auth handoff</strong>
-                <span>Forward bearer headers through the gateway or resolve tokens with service-to-service calls.</span>
-              </div>
-            </div>
-            <div class="arch-paths" aria-label="Example request paths">
-              <div class="arch-path">
-                <strong>client</strong>
-                <span><code>orders.create</code> enters the gateway as one public procedure.</span>
-              </div>
-              <div class="arch-path">
-                <strong>gateway</strong>
-                <span>Routes to the orders service as local <code>create</code>.</span>
-              </div>
-              <div class="arch-path">
-                <strong>orders</strong>
-                <span>Calls users or auth with the same typed Neo client surface.</span>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 
       <section class="section split reveal" id="protocol" aria-labelledby="protocol-title">
         <div>
-          <p class="section-kicker">HTTP where it fits, binary where it helps</p>
-          <h2 id="protocol-title">A small RPC surface with JSON and Neo binary envelopes.</h2>
+          <p class="section-kicker">Small HTTP surface, typed application core</p>
+          <h2 id="protocol-title">JSON for inspection. Binary for Go-to-Go unary calls.</h2>
           <p class="section-intro">
-            Queries can travel over GET or POST, mutations use POST, and
-            subscriptions stream through NDJSON or WebSocket. Go clients can
-            opt into <code>application/x-neo-bin</code> for unary calls without
-            changing procedure code.
+            Queries can use GET or POST, mutations use POST, and subscriptions
+            stream with NDJSON or WebSocket. Go clients can opt into
+            <code>application/x-neo-bin</code> without changing procedure code.
           </p>
           <div class="feature-list">
             <div class="feature-row">
               <strong>Typed handlers</strong>
-              <span>Generic Go procedures keep request and response types visible at registration time.</span>
+              <span>Input and output types stay visible at registration time.</span>
             </div>
             <div class="feature-row">
               <strong>Middleware</strong>
-              <span>Wrap procedure execution for auth, logging, rate limits, tracing, and recovery.</span>
-            </div>
-            <div class="feature-row">
-              <strong>Event broker</strong>
-              <span>Start with the in-memory bus, then swap in NATS or any broker implementing Neo's tiny interface.</span>
-            </div>
-            <div class="feature-row">
-              <strong>Binary envelope</strong>
-              <span><code>NEO1</code> TLV records use varints, counted lists, field numbers, and JSON-tagged field names.</span>
+              <span>Wrap procedure execution for auth, logging, rate limits, tracing, or recovery.</span>
             </div>
             <div class="feature-row">
               <strong>Safe errors</strong>
-              <span>Machine-readable codes reach the client while internal Go errors stay server-side.</span>
+              <span>Machine-readable codes reach clients while plain internal errors stay server-side.</span>
+            </div>
+            <div class="feature-row">
+              <strong>Validation</strong>
+              <span>Inputs can implement <code>Validate() error</code> before the handler runs.</span>
             </div>
           </div>
         </div>
-        <aside class="protocol-panel" aria-label="Neo protocol routes">
-          <div class="protocol-head">
+
+        <aside class="route-stack" aria-label="Neo protocol routes">
+          <div class="route-head">
             <strong>/neo</strong>
             <span class="status">ready</span>
           </div>
-          <div class="protocol-body">
+          <div class="routes">
             <div class="route">
               <span class="method get">GET</span>
               <code>/user.get?input={"id":1}</code>
@@ -1529,7 +1397,7 @@ router.ListenAndServe(neo.ServerOptions{
             </div>
             <div class="route">
               <span class="method bin">BIN</span>
-              <code>Content-Type: application/x-neo-bin · NEO1 TLV</code>
+              <code>Content-Type: application/x-neo-bin</code>
             </div>
             <div class="route">
               <span class="method get">NDJSON</span>
@@ -1543,101 +1411,163 @@ router.ListenAndServe(neo.ServerOptions{
         </aside>
       </section>
 
-      <section class="section reveal" id="benchmarks" aria-labelledby="benchmarks-title">
-        <p class="section-kicker">Local benchmark</p>
-        <h2 id="benchmarks-title">Neo can bypass kernel TCP and stay ahead of gRPC.</h2>
+      <section class="section reveal" id="gateway" aria-labelledby="gateway-title">
+        <p class="section-kicker">Gateway when services split</p>
+        <h2 id="gateway-title">One public API can route to many Neo services.</h2>
         <p class="section-intro">
-          Mount Neo on <code>bufconn</code> for in-process calls that still
-          exercise the HTTP handler and RPC envelope without touching a kernel
-          socket. These numbers are from the benchmark suite in this repo.
+          Mount local routers for a modular monolith, or proxy remote services
+          behind one gateway. Service prefixes stay public while each upstream
+          keeps its local procedure keys.
         </p>
-        <div class="benchmark-layout">
-          <div class="benchmark-summary" aria-label="Benchmark summary">
-            <div>
-              <strong>17.5 us</strong>
-              <span>Neo query over <code>bufconn</code> on an Apple M2.</span>
+        <div class="architecture">
+          <div class="architecture-map" aria-label="Neo gateway architecture">
+            <div class="tier">
+              <span class="tier-label">Clients</span>
+              <div class="node">
+                <strong>Generated Go and TypeScript clients</strong>
+                <span>Call <code>users.getByID</code>, <code>orders.create</code>, and <code>auth.me</code>.</span>
+              </div>
             </div>
-            <div>
-              <strong>18% lower</strong>
-              <span>Latency than the gRPC unary <code>bufconn</code> baseline in the same benchmark run.</span>
+            <div class="tier">
+              <span class="tier-label">Gateway</span>
+              <div class="node">
+                <strong><code>/neo</code> public API</strong>
+                <span>Prefixes metadata, forwards headers, and strips service names before proxying upstream.</span>
+              </div>
             </div>
-            <div>
-              <strong>47% fewer</strong>
-              <span>Allocations than the gRPC unary path for the in-memory row.</span>
+            <div class="tier">
+              <span class="tier-label">Services</span>
+              <div class="service-grid">
+                <div class="node">
+                  <strong>users</strong>
+                  <span><code>getByID</code></span>
+                </div>
+                <div class="node">
+                  <strong>orders</strong>
+                  <span><code>create</code></span>
+                </div>
+                <div class="node">
+                  <strong>auth</strong>
+                  <span><code>login</code> / <code>me</code></span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <figure class="benchmark-chart" aria-labelledby="chart-title">
-            <header>
-              <h3 id="chart-title">Unary request cost</h3>
-              <span>lower is better / us/op</span>
-            </header>
-
-            <div class="chart-group">
-              <h4>In-memory listener</h4>
-              <div class="bar-row">
-                <span class="bar-label">Neo query bufconn</span>
-                <span class="bar-track" aria-hidden="true">
-                  <span class="bar" style="--bar-width: 82%"></span>
-                </span>
-                <span class="bar-value">17.5</span>
-              </div>
-              <div class="bar-row">
-                <span class="bar-label">gRPC unary bufconn</span>
-                <span class="bar-track" aria-hidden="true">
-                  <span class="bar grpc" style="--bar-width: 100%"></span>
-                </span>
-                <span class="bar-value">21.5</span>
-              </div>
+          <div class="paths" aria-label="Gateway request flow">
+            <div class="path">
+              <strong>client</strong>
+              <span><code>orders.create</code> enters the gateway as one public procedure.</span>
             </div>
-
-            <div class="chart-group">
-              <h4>Loopback TCP</h4>
-              <div class="bar-row">
-                <span class="bar-label">Neo query HTTP</span>
-                <span class="bar-track" aria-hidden="true">
-                  <span class="bar" style="--bar-width: 96%"></span>
-                </span>
-                <span class="bar-value">44.2</span>
-              </div>
-              <div class="bar-row">
-                <span class="bar-label">gRPC unary TCP</span>
-                <span class="bar-track" aria-hidden="true">
-                  <span class="bar grpc" style="--bar-width: 100%"></span>
-                </span>
-                <span class="bar-value">46.1</span>
-              </div>
+            <div class="path">
+              <strong>gateway</strong>
+              <span>Routes to the orders service as local <code>create</code>.</span>
             </div>
-
-            <p class="benchmark-note">
-              <code>go test -bench=. -benchmem ./...</code> on Apple M2, Go 1.26.3. The
-              <code>bufconn</code> example is runnable with
-              <code>go run ./examples/bufconn</code>.
-            </p>
-          </figure>
+            <div class="path">
+              <strong>orders</strong>
+              <span>Calls users or auth with the same typed Neo client surface.</span>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="section reveal" id="quickstart" aria-labelledby="quickstart-title">
-        <p class="section-kicker">Quick start</p>
-        <h2 id="quickstart-title">Ship the first endpoint in a few lines.</h2>
-        <p class="section-intro">
-          Neo uses the standard library HTTP stack, so it can own the server or
-          sit beside your existing handlers.
-        </p>
-        <div class="quickstart">
-          <div class="code-card">
-            <div class="code-title">
-              <span>main.go</span>
-              <span>query procedure</span>
+      <section class="section split reveal" id="codegen" aria-labelledby="codegen-title">
+        <div>
+          <p class="section-kicker">Generated clients without another schema language</p>
+          <h2 id="codegen-title">Metadata turns registered procedures into typed clients.</h2>
+          <p class="section-intro">
+            <code>neo-gen</code> scans local registrations or a running
+            <code>/_meta</code> endpoint. It can write Go clients, TypeScript
+            clients, Markdown docs, and schema-style metadata exports.
+          </p>
+          <div class="feature-list">
+            <div class="feature-row">
+              <strong>Go client</strong>
+              <span>Namespaced query, mutation, NDJSON subscription, and WebSocket helpers.</span>
             </div>
+            <div class="feature-row">
+              <strong>TypeScript</strong>
+              <span>Interfaces from Go structs and JSON tags, plus fetch and WebSocket helpers.</span>
+            </div>
+            <div class="feature-row">
+              <strong>Remote metadata</strong>
+              <span>Generate clients from a live server or gateway metadata endpoint.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="code-block" aria-label="neo-gen commands">
+          <div class="code-title">
+            <span>neo-gen</span>
+            <span>local or remote metadata</span>
+          </div>
+<pre><code><span class="comment"># typed Go client</span>
+go run ./cmd/neo-gen \
+  -dir ./examples \
+  -out ./examples/neo.gen.go
+
+<span class="comment"># from a running server</span>
+go run ./cmd/neo-gen \
+  -metadata-url http://localhost:8080/neo/_meta \
+  -package main \
+  -out ./neo.gen.go
+
+<span class="comment"># TypeScript runtime and client</span>
+go run ./cmd/neo-gen -target ts-runtime
+go run ./cmd/neo-gen -target ts</code></pre>
+        </div>
+      </section>
+
+      <section class="section reveal" id="transports" aria-labelledby="transports-title">
+        <p class="section-kicker">Transport choices stay explicit</p>
+        <h2 id="transports-title">Start boring, then swap the parts that need power.</h2>
+        <p class="section-intro">
+          Neo keeps the default path inspectable and standard-library friendly.
+          When the app grows, the event broker, HTTP client, headers, CORS, and
+          gateway metadata can be configured without changing procedure code.
+        </p>
+        <div class="transport-grid">
+          <article class="transport">
+            <strong>JSON HTTP</strong>
+            <p>Readable requests and responses for browsers, curl, and debugging.</p>
+          </article>
+          <article class="transport">
+            <strong>Neo binary</strong>
+            <p>Optional compact envelope for unary Go client queries and mutations.</p>
+          </article>
+          <article class="transport">
+            <strong>NDJSON streams</strong>
+            <p>Simple HTTP subscription streams with one envelope per event.</p>
+          </article>
+          <article class="transport">
+            <strong>WebSocket</strong>
+            <p>Browser-friendly subscription transport using the same response envelope.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section split reveal" id="install" aria-labelledby="install-title">
+        <div>
+          <p class="section-kicker">Quick start</p>
+          <h2 id="install-title">First endpoint, no framework ceremony.</h2>
+          <p class="section-intro">
+            Neo can own the server or sit next to existing handlers in your
+            <code>http.ServeMux</code>.
+          </p>
+        </div>
+
+        <div class="code-block">
+          <div class="code-title">
+            <span>main.go</span>
+            <span>query procedure</span>
+          </div>
 <pre><code>package main
 
 import (
-  <span class="token-str">"context"</span>
-  <span class="token-str">"log"</span>
+  <span class="str">"context"</span>
+  <span class="str">"log"</span>
 
-  <span class="token-str">"github.com/Protocol-Lattice/neo"</span>
+  <span class="str">"github.com/Protocol-Lattice/neo"</span>
 )
 
 type HelloInput struct {
@@ -1649,35 +1579,19 @@ type HelloOutput struct {
 }
 
 func main() {
-  router := <span class="token-fn">neo.NewRouter</span>()
+  router := <span class="fn">neo.NewRouter</span>()
 
-  router.Register(<span class="token-str">"hello"</span>, <span class="token-fn">neo.Query</span>(
+  router.Register(<span class="str">"hello"</span>, <span class="fn">neo.Query</span>(
     func(ctx context.Context, in HelloInput) (HelloOutput, error) {
-      return HelloOutput{Message: <span class="token-str">"Hello, "</span> + in.Name}, nil
+      return HelloOutput{Message: <span class="str">"Hello, "</span> + in.Name}, nil
     },
   ))
 
   log.Fatal(router.ListenAndServe(neo.ServerOptions{
-    Addr:   <span class="token-str">":8080"</span>,
-    Prefix: <span class="token-str">"/neo/"</span>,
+    Addr:   <span class="str">":8080"</span>,
+    Prefix: <span class="str">"/neo/"</span>,
   }))
 }</code></pre>
-          </div>
-          <aside class="note-panel">
-            <div>
-              <h3>Use the same shape everywhere.</h3>
-              <p>
-                Procedure metadata powers generated clients, so application code
-                can call typed namespaces instead of hand-building URLs.
-              </p>
-            </div>
-            <ul class="checks">
-              <li>Generated Go client namespaces</li>
-              <li>Generated TypeScript interfaces from Go structs</li>
-              <li>Typed NDJSON and WebSocket subscription helpers</li>
-              <li>Custom fetch, WebSocket, and header options</li>
-            </ul>
-          </aside>
         </div>
       </section>
 
@@ -1688,7 +1602,7 @@ func main() {
         </div>
         <div class="actions">
           <a class="button primary" href="#top">Back to top</a>
-          <a class="button" href="https://github.com/Protocol-Lattice/neo">Open README</a>
+          <a class="button" href="https://github.com/Protocol-Lattice/neo">Open GitHub</a>
         </div>
       </section>
     </main>
@@ -1759,7 +1673,7 @@ func main() {
               }
             });
           },
-          { threshold: 0.18 }
+          { threshold: 0.16 }
         );
 
         revealItems.forEach((item) => observer.observe(item));
