@@ -346,6 +346,32 @@ Register recovery before the procedures it should wrap. If you use other
 middleware that can panic, place `neo.Recover()` before that middleware so it
 wraps the rest of the chain.
 
+### Procedure Observability
+
+Use `neo.Observe` to capture low-cardinality procedure signals without forcing
+a metrics or tracing dependency. The hook runs after each query, mutation, or
+subscription open call.
+
+```go
+router.Use(neo.Observe(func(ctx context.Context, obs neo.Observation) {
+	log.Printf(
+		"procedure=%s kind=%s duration=%s code=%s err=%v",
+		obs.Procedure,
+		obs.Kind,
+		obs.Duration,
+		obs.Code,
+		obs.Error,
+	)
+}))
+```
+
+`Observation` includes the procedure key, procedure kind, duration, returned
+error, and normalized error code. Use those fields to wire Neo into `log/slog`,
+Prometheus histograms/counters, OpenTelemetry spans, StatsD, or another
+application-owned observability stack. Procedure keys and kinds are bounded
+labels; avoid adding user IDs, raw inputs, or other high-cardinality values to
+metrics.
+
 ### Authentication Example
 
 ```go
@@ -803,7 +829,7 @@ Recommended production concerns:
 - Panic recovery middleware.
 - Rate limiting.
 - Structured logging.
-- Metrics and tracing.
+- Metrics and tracing via `neo.Observe`.
 - Graceful shutdown.
 - Distributed event broker with delivery semantics that match your product.
 - Generated clients checked in CI.

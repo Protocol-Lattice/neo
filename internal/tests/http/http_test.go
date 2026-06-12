@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -120,6 +121,121 @@ func TestExplicitErrorMessagePassesThroughForNonInternalCode(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "user not found") {
 		t.Fatalf("explicit message was not returned: %s", rec.Body.String())
+	}
+}
+
+func TestObserveReportsProcedureMetadataForQueryAndMutation(t *testing.T) {
+	var observations []routest.Observation
+
+	router := routest.NewRouter()
+	router.Use(routest.Observe(func(ctx context.Context, observation routest.Observation) {
+		observations = append(observations, observation)
+	}))
+	router.Register("user.get", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "ok", nil
+	}))
+	router.Register("user.create", routest.Mutation(func(context.Context, struct{}) (string, error) {
+		return "created", nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	get := httptest.NewRecorder()
+	mux.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/neo/user.get", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET status = %d body=%s", get.Code, get.Body.String())
+	}
+
+	post := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/neo/user.create", strings.NewReader(`{"input":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(post, req)
+	if post.Code != http.StatusOK {
+		t.Fatalf("POST status = %d body=%s", post.Code, post.Body.String())
+	}
+
+	if len(observations) != 2 {
+		t.Fatalf("observations len = %d, want 2: %#v", len(observations), observations)
+	}
+	got := []string{
+		string(observations[0].Kind) + ":" + observations[0].Procedure,
+		string(observations[1].Kind) + ":" + observations[1].Procedure,
+	}
+	want := []string{"query:user.get", "mutation:user.create"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("observations = %#v, want %#v", got, want)
+	}
+	if observations[0].Duration <= 0 || observations[1].Duration <= 0 {
+		t.Fatalf("durations = %s, %s; want positive", observations[0].Duration, observations[1].Duration)
+	}
+}
+
+func TestObserveReportsErrorCodes(t *testing.T) {
+	var observations []routest.Observation
+
+	router := routest.NewRouter()
+	router.Use(routest.Observe(func(ctx context.Context, observation routest.Observation) {
+		observations = append(observations, observation)
+	}))
+	router.Register("plain", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "", errors.New("database failed")
+	}))
+	router.Register("coded", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "", routest.NewError(routest.CodeNotFound, "missing")
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	for _, path := range []string{"/neo/plain", "/neo/coded"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	if len(observations) != 2 {
+		t.Fatalf("observations len = %d, want 2: %#v", len(observations), observations)
+	}
+	got := []string{
+		observations[0].Procedure + ":" + string(observations[0].Code),
+		observations[1].Procedure + ":" + string(observations[1].Code),
+	}
+	want := []string{"plain:INTERNAL", "coded:NOT_FOUND"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("observations = %#v, want %#v", got, want)
+	}
+	if observations[0].Error == nil || observations[1].Error == nil {
+		t.Fatalf("observed errors = %v, %v; want both set", observations[0].Error, observations[1].Error)
+	}
+}
+
+func TestObserveReportsSubscriptionOpen(t *testing.T) {
+	var got routest.Observation
+
+	router := routest.NewRouter()
+	router.Use(routest.Observe(func(ctx context.Context, observation routest.Observation) {
+		got = observation
+	}))
+	router.RegisterSubscription("events.feed", routest.Subscription(func(ctx context.Context, _ struct{}) (<-chan string, error) {
+		ch := make(chan string, 1)
+		ch <- "ok"
+		close(ch)
+		return ch, nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/neo/events.feed", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got.Procedure != "events.feed" || got.Kind != routest.ProcedureKindSubscription {
+		t.Fatalf("observation = %#v, want subscription metadata", got)
+	}
+	if got.Duration <= 0 || got.Error != nil || got.Code != "" {
+		t.Fatalf("observation = %#v, want successful subscription open", got)
 	}
 }
 

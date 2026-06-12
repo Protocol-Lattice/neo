@@ -47,6 +47,8 @@ type (
 	GatewayServiceDiagnostics              = gatewayruntime.GatewayServiceDiagnostics
 	Handler                                = runtime.Handler
 	Middleware                             = runtime.Middleware
+	Observation                            = runtime.Observation
+	Observer                               = runtime.Observer
 	Procedure[Fn, In, Out any]             = runtime.Procedure[Fn, In, Out]
 	ProcedureKind                          = runtime.ProcedureKind
 	ProcedureMeta                          = runtime.ProcedureMeta
@@ -76,6 +78,7 @@ var (
 
 	NewError          = runtime.NewError
 	Errorf            = runtime.Errorf
+	Observe           = runtime.Observe
 	Recover           = runtime.Recover
 	WrapError         = runtime.WrapError
 	WithSummary       = runtime.WithSummary

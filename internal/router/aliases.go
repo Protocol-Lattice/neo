@@ -46,8 +46,10 @@ type (
 	EventBus        = broker.EventBus
 	EventBusOptions = broker.EventBusOptions
 
-	Handler    = middleware.Handler
-	Middleware = middleware.Middleware
+	Handler     = middleware.Handler
+	Middleware  = middleware.Middleware
+	Observation = middleware.Observation
+	Observer    = middleware.Observer
 
 	Procedure[Fn, In, Out any]             = procedure.Procedure[Fn, In, Out]
 	ProcedureKind                          = procedure.ProcedureKind
@@ -126,6 +128,14 @@ func applyMiddlewares(middlewares []Middleware, handler Handler) Handler {
 
 func Recover() Middleware {
 	return middleware.Recover()
+}
+
+func Observe(observer Observer) Middleware {
+	return middleware.Observe(observer)
+}
+
+func WithObservation(ctx context.Context, observation Observation) context.Context {
+	return middleware.WithObservation(ctx, observation)
 }
 
 func cloneMiddlewares(middlewares []Middleware) []Middleware {

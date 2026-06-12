@@ -53,6 +53,8 @@ type (
 	GatewayServiceDiagnostics              = routerpkg.GatewayServiceDiagnostics
 	Handler                                = routerpkg.Handler
 	Middleware                             = routerpkg.Middleware
+	Observation                            = routerpkg.Observation
+	Observer                               = routerpkg.Observer
 	Procedure[Fn, In, Out any]             = routerpkg.Procedure[Fn, In, Out]
 	ProcedureKind                          = routerpkg.ProcedureKind
 	ProcedureMeta                          = routerpkg.ProcedureMeta
@@ -91,6 +93,7 @@ var (
 
 	NewError          = routerpkg.NewError
 	Errorf            = routerpkg.Errorf
+	Observe           = routerpkg.Observe
 	Recover           = routerpkg.Recover
 	WrapError         = routerpkg.WrapError
 	WithSummary       = routerpkg.WithSummary
