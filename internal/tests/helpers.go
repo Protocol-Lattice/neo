@@ -38,6 +38,8 @@ const InternalErrorMessage = "internal server error"
 type (
 	Handler                                = routerruntime.Handler
 	Middleware                             = routerruntime.Middleware
+	Observation                            = routerruntime.Observation
+	Observer                               = routerruntime.Observer
 	Procedure[Fn, In, Out any]             = routerruntime.Procedure[Fn, In, Out]
 	ProcedureMeta                          = routerruntime.ProcedureMeta
 	ProcedureOption                        = routerruntime.ProcedureOption
@@ -51,26 +53,28 @@ type (
 )
 
 const (
-	MetadataPath          = routerruntime.MetadataPath
-	CodeBadRequest        = routerruntime.CodeBadRequest
-	CodeUnauthorized      = routerruntime.CodeUnauthorized
-	CodeForbidden         = routerruntime.CodeForbidden
-	CodeNotFound          = routerruntime.CodeNotFound
-	CodeMethodNotAllowed  = routerruntime.CodeMethodNotAllowed
-	CodeConflict          = routerruntime.CodeConflict
-	CodeInternal          = routerruntime.CodeInternal
-	CodeNotImplemented    = routerruntime.CodeNotImplemented
-	CodeUnavailable       = routerruntime.CodeUnavailable
-	CodeTimeout           = routerruntime.CodeTimeout
-	ProcedureKindQuery    = routerruntime.ProcedureKindQuery
-	ProcedureKindMutation = routerruntime.ProcedureKindMutation
-	DefaultMaxRequestBody = routerruntime.DefaultMaxRequestBody
+	MetadataPath              = routerruntime.MetadataPath
+	CodeBadRequest            = routerruntime.CodeBadRequest
+	CodeUnauthorized          = routerruntime.CodeUnauthorized
+	CodeForbidden             = routerruntime.CodeForbidden
+	CodeNotFound              = routerruntime.CodeNotFound
+	CodeMethodNotAllowed      = routerruntime.CodeMethodNotAllowed
+	CodeConflict              = routerruntime.CodeConflict
+	CodeInternal              = routerruntime.CodeInternal
+	CodeNotImplemented        = routerruntime.CodeNotImplemented
+	CodeUnavailable           = routerruntime.CodeUnavailable
+	CodeTimeout               = routerruntime.CodeTimeout
+	ProcedureKindQuery        = routerruntime.ProcedureKindQuery
+	ProcedureKindMutation     = routerruntime.ProcedureKindMutation
+	ProcedureKindSubscription = routerruntime.ProcedureKindSubscription
+	DefaultMaxRequestBody     = routerruntime.DefaultMaxRequestBody
 )
 
 var (
 	NewRouter                 = routerruntime.NewRouter
 	NewError                  = routerruntime.NewError
 	Errorf                    = routerruntime.Errorf
+	Observe                   = routerruntime.Observe
 	Recover                   = routerruntime.Recover
 	WrapError                 = routerruntime.WrapError
 	ServerOptionsWithDefaults = routerruntime.ServerOptionsWithDefaults

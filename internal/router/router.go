@@ -342,7 +342,7 @@ func (router *Router) HTTPHandler(prefix string) http.Handler {
 			return
 		}
 
-		output, err := callProcedure(r.Context(), procedure, router.procedureMiddlewares[key], input)
+		output, err := callProcedure(r.Context(), key, procedure, router.procedureMiddlewares[key], input)
 		if err != nil {
 			writeProcedureError(w, err)
 			return
@@ -383,7 +383,7 @@ func (router *Router) openSubscriptionStream(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 
-	rawStream, err := callSubscription(r.Context(), subscription, router.subscriptionMiddlewares[key], input)
+	rawStream, err := callSubscription(r.Context(), key, subscription, router.subscriptionMiddlewares[key], input)
 	if err != nil {
 		writeProcedureError(w, err)
 		return nil, false
@@ -429,10 +429,16 @@ func serveNDJSONSubscription(w http.ResponseWriter, r *http.Request, stream <-ch
 
 func callProcedure(
 	ctx context.Context,
+	key string,
 	procedure *Procedure[any, any, any],
 	middlewares []Middleware,
 	input any,
 ) (any, error) {
+	ctx = WithObservation(ctx, Observation{
+		Procedure: key,
+		Kind:      procedure.Kind,
+	})
+
 	if len(middlewares) == 0 {
 		return procedure.Call(ctx, procedure.Fn, input)
 	}
@@ -445,10 +451,16 @@ func callProcedure(
 
 func callSubscription(
 	ctx context.Context,
+	key string,
 	subscription *SubscriptionProcedure[any, any, any],
 	middlewares []Middleware,
 	input any,
 ) (any, error) {
+	ctx = WithObservation(ctx, Observation{
+		Procedure: key,
+		Kind:      ProcedureKindSubscription,
+	})
+
 	if len(middlewares) == 0 {
 		return subscription.Call(ctx, subscription.Fn, input)
 	}

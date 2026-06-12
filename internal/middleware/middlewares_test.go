@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	neoerrors "github.com/Protocol-Lattice/neo/internal/errors"
+	"github.com/Protocol-Lattice/neo/internal/procedure"
 )
 
 func TestApplyMiddlewaresWrapsInRegistrationOrder(t *testing.T) {
@@ -92,6 +95,115 @@ func TestRecoverPreservesReturnedError(t *testing.T) {
 	_, err := handler(context.Background(), nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestObserveReportsSuccess(t *testing.T) {
+	var got Observation
+	handler := Apply([]Middleware{Observe(func(ctx context.Context, observation Observation) {
+		got = observation
+	})}, func(ctx context.Context, input any) (any, error) {
+		return "ok", nil
+	})
+
+	ctx := WithObservation(context.Background(), Observation{
+		Procedure: "user.get",
+		Kind:      procedure.ProcedureKindQuery,
+	})
+	out, err := handler(ctx, nil)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if out != "ok" {
+		t.Fatalf("out = %v, want ok", out)
+	}
+	if got.Procedure != "user.get" || got.Kind != procedure.ProcedureKindQuery {
+		t.Fatalf("observation = %#v, want procedure metadata", got)
+	}
+	if got.Duration <= 0 {
+		t.Fatalf("duration = %s, want positive", got.Duration)
+	}
+	if got.Error != nil || got.Code != "" {
+		t.Fatalf("observation error = %v code = %q, want success", got.Error, got.Code)
+	}
+}
+
+func TestObserveReportsErrorCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code neoerrors.ErrorCode
+	}{
+		{
+			name: "plain error",
+			err:  errors.New("database failed"),
+			code: neoerrors.CodeInternal,
+		},
+		{
+			name: "coded error",
+			err:  neoerrors.NewError(neoerrors.CodeNotFound, "missing"),
+			code: neoerrors.CodeNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got Observation
+			handler := Apply([]Middleware{Observe(func(ctx context.Context, observation Observation) {
+				got = observation
+			})}, func(ctx context.Context, input any) (any, error) {
+				return nil, tt.err
+			})
+
+			_, err := handler(context.Background(), nil)
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("error = %v, want %v", err, tt.err)
+			}
+			if got.Error != tt.err {
+				t.Fatalf("observed error = %v, want %v", got.Error, tt.err)
+			}
+			if got.Code != tt.code {
+				t.Fatalf("code = %q, want %q", got.Code, tt.code)
+			}
+		})
+	}
+}
+
+func TestObserveReportsAndReraisesPanic(t *testing.T) {
+	var got Observation
+	handler := Apply([]Middleware{Observe(func(ctx context.Context, observation Observation) {
+		got = observation
+	})}, func(ctx context.Context, input any) (any, error) {
+		panic("boom")
+	})
+
+	defer func() {
+		recovered := recover()
+		if recovered != "boom" {
+			t.Fatalf("panic = %v, want boom", recovered)
+		}
+		if got.Error == nil {
+			t.Fatal("observed error is nil, want panic error")
+		}
+		if got.Code != neoerrors.CodeInternal {
+			t.Fatalf("code = %q, want %q", got.Code, neoerrors.CodeInternal)
+		}
+	}()
+
+	_, _ = handler(context.Background(), nil)
+}
+
+func TestObserveAllowsNilObserver(t *testing.T) {
+	handler := Apply([]Middleware{Observe(nil)}, func(ctx context.Context, input any) (any, error) {
+		return "ok", nil
+	})
+
+	out, err := handler(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if out != "ok" {
+		t.Fatalf("out = %v, want ok", out)
 	}
 }
 
