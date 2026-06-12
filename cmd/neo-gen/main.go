@@ -82,7 +82,7 @@ func parseCommandConfig(args []string, stderr io.Writer) (commandConfig, error) 
 	flags.StringVar(&cfg.dir, "dir", ".", "directory containing procedure registrations")
 	flags.StringVar(&cfg.out, "out", "neo.gen.go", "output file")
 	flags.StringVar(&cfg.packageOverride, "package", "", "optional generated package name")
-	flags.StringVar(&cfg.target, "target", "go", "generation target: go, ts, ts-runtime, ts-standalone, docs, or schema")
+	flags.StringVar(&cfg.target, "target", "go", "generation target: go, ts, ts-runtime, ts-standalone, docs, schema, or openapi")
 	flags.StringVar(&cfg.tsRuntimeImport, "ts-runtime-import", "./neo.runtime.ts", "runtime import path for generated TypeScript clients")
 	flags.StringVar(&cfg.metadataURL, "metadata-url", "", "optional Neo metadata endpoint or base URL to generate from")
 
@@ -240,7 +240,13 @@ func generateTarget(scan packageScan, pkg string, cfg commandConfig) ([]byte, er
 			return src, fmt.Errorf("generate: %w", err)
 		}
 		return src, nil
+	case "openapi", "openapi-json":
+		src, err := generateOpenAPI(scan.Procedures, scan.Types)
+		if err != nil {
+			return src, fmt.Errorf("generate: %w", err)
+		}
+		return src, nil
 	default:
-		return nil, fmt.Errorf("unsupported target %q; expected go, ts, ts-runtime, ts-standalone, docs, or schema", cfg.target)
+		return nil, fmt.Errorf("unsupported target %q; expected go, ts, ts-runtime, ts-standalone, docs, schema, or openapi", cfg.target)
 	}
 }

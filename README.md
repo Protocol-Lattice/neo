@@ -550,11 +550,16 @@ NDJSON subscriptions. Browser WebSocket constructors do not allow custom
 request headers, so WebSocket auth should use cookies or a server-issued token
 encoded in the subscription input or URL.
 
-Generate Markdown docs or schema-style metadata:
+Generate Markdown docs, schema-style metadata, or OpenAPI:
 
 ```sh
 go run ./cmd/neo-gen -dir ./examples -target docs -out ./API.md
 go run ./cmd/neo-gen -dir ./examples -target schema -out ./neo.schema.json
+go run ./cmd/neo-gen -dir ./examples -target openapi -out ./openapi.json
+go run ./cmd/neo-gen \
+  -metadata-url http://localhost:8080/neo/_meta \
+  -target openapi \
+  -out ./openapi.json
 ```
 
 `neo-gen` can generate:
@@ -568,6 +573,7 @@ go run ./cmd/neo-gen -dir ./examples -target schema -out ./neo.schema.json
 - TypeScript runtime files or standalone clients.
 - Markdown procedure docs.
 - JSON schema-style procedure metadata exports.
+- OpenAPI JSON documents from local procedure registrations or metadata URLs.
 
 ## Gateways and Microservices
 

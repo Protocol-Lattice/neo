@@ -14,6 +14,49 @@ import (
 	"testing"
 )
 
+type openAPITestDocument struct {
+	OpenAPI string `json:"openapi"`
+	Info    struct {
+		Title   string `json:"title"`
+		Version string `json:"version"`
+	} `json:"info"`
+	Paths      map[string]map[string]openAPITestOperation `json:"paths"`
+	Components struct {
+		Schemas map[string]map[string]any `json:"schemas"`
+	} `json:"components"`
+}
+
+type openAPITestOperation struct {
+	OperationID string                       `json:"operationId"`
+	Summary     string                       `json:"summary,omitempty"`
+	Description string                       `json:"description,omitempty"`
+	Tags        []string                     `json:"tags,omitempty"`
+	Deprecated  bool                         `json:"deprecated,omitempty"`
+	Parameters  []openAPITestParameter       `json:"parameters,omitempty"`
+	RequestBody *openAPITestRequestBody      `json:"requestBody,omitempty"`
+	Responses   map[string]openAPITestResult `json:"responses"`
+}
+
+type openAPITestParameter struct {
+	Name    string                          `json:"name"`
+	In      string                          `json:"in"`
+	Content map[string]openAPITestMediaType `json:"content"`
+}
+
+type openAPITestRequestBody struct {
+	Required bool                            `json:"required"`
+	Content  map[string]openAPITestMediaType `json:"content"`
+}
+
+type openAPITestResult struct {
+	Description string                          `json:"description"`
+	Content     map[string]openAPITestMediaType `json:"content,omitempty"`
+}
+
+type openAPITestMediaType struct {
+	Schema map[string]any `json:"schema"`
+}
+
 func TestScanDirFindsRootNestedAndSubscriptionProcedures(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "routes.go", `package example
@@ -624,6 +667,171 @@ func TestGenerateDocsAndSchemaUseProcedureMetadata(t *testing.T) {
 	assertContains(t, schemaText, `"deprecated": true`)
 }
 
+func TestGenerateOpenAPIMapsNeoProcedures(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.go", `package example
+
+type NoInput struct{}
+type GetUserInput struct {
+	ID           int  `+"`json:\"id\"`"+`
+	IncludePosts bool `+"`json:\"includePosts,omitempty\"`"+`
+}
+type User struct {
+	ID   int      `+"`json:\"id\"`"+`
+	Name string   `+"`json:\"name\"`"+`
+	Tags []string `+"`json:\"tags,omitempty\"`"+`
+}
+type UserEvent struct {
+	Name string `+"`json:\"name\"`"+`
+	Data User   `+"`json:\"data\"`"+`
+}
+
+func register(root, users Router) {
+	root.Register("health", neo.Query[NoInput, User](nil))
+	root.Nested("user", users)
+	users.Register("getByID", neo.Query[GetUserInput, User](
+		nil,
+		neo.WithSummary("Get user"),
+		neo.WithDescription("Returns one user."),
+		neo.WithTags("users", "read"),
+	))
+	users.Register("create", neo.Mutation[GetUserInput, User](
+		nil,
+		neo.WithDeprecated(),
+	))
+	users.RegisterSubscription("changes", neo.Subscription[NoInput, UserEvent](nil))
+}
+`)
+
+	scan, err := scanPackage(dir)
+	if err != nil {
+		t.Fatalf("scanPackage returned error: %v", err)
+	}
+
+	src, err := generateOpenAPI(scan.Procedures, scan.Types)
+	if err != nil {
+		t.Fatalf("generateOpenAPI returned error: %v", err)
+	}
+	doc := decodeOpenAPIDocument(t, src)
+
+	assertEqual(t, doc.OpenAPI, "3.1.0")
+	assertEqual(t, doc.Info.Title, "Neo API")
+	assertEqual(t, doc.Info.Version, "1.0.0")
+
+	get := doc.Paths["/user.getByID"]["get"]
+	assertEqual(t, get.OperationID, "user_getByID_query")
+	assertEqual(t, get.Summary, "Get user")
+	assertEqual(t, get.Description, "Returns one user.")
+	if !reflect.DeepEqual(get.Tags, []string{"users", "read"}) {
+		t.Fatalf("GET tags = %#v, want users/read", get.Tags)
+	}
+	if len(get.Parameters) != 1 {
+		t.Fatalf("GET parameters len = %d, want 1", len(get.Parameters))
+	}
+	assertEqual(t, get.Parameters[0].Name, "input")
+	assertEqual(t, get.Parameters[0].In, "query")
+	assertSchemaRef(t, get.Parameters[0].Content["application/json"].Schema, "#/components/schemas/GetUserInput")
+
+	queryPost := doc.Paths["/user.getByID"]["post"]
+	assertEqual(t, queryPost.OperationID, "user_getByID_query_post")
+	assertRequestEnvelopeInputRef(t, queryPost.RequestBody, "#/components/schemas/GetUserInput")
+	assertResponseEnvelopeResultRef(t, queryPost.Responses["200"], "#/components/schemas/User")
+
+	mutation := doc.Paths["/user.create"]["post"]
+	assertEqual(t, mutation.OperationID, "user_create_mutation")
+	if !mutation.Deprecated {
+		t.Fatal("mutation deprecated = false, want true")
+	}
+	assertRequestEnvelopeInputRef(t, mutation.RequestBody, "#/components/schemas/GetUserInput")
+	assertResponseEnvelopeResultRef(t, mutation.Responses["200"], "#/components/schemas/User")
+
+	subscription := doc.Paths["/user.changes"]["get"]
+	assertEqual(t, subscription.OperationID, "user_changes_subscription")
+	assertSchemaRef(t, subscription.Parameters[0].Content["application/json"].Schema, "#/components/schemas/NoInput")
+	assertResponseEnvelopeResultRefForContent(
+		t,
+		subscription.Responses["200"],
+		"application/x-ndjson",
+		"#/components/schemas/UserEvent",
+	)
+
+	getUserInput := doc.Components.Schemas["GetUserInput"]
+	id := schemaProperty(t, getUserInput, "id")
+	assertEqual(t, id["type"].(string), "integer")
+	includePosts := schemaProperty(t, getUserInput, "includePosts")
+	assertEqual(t, includePosts["type"].(string), "boolean")
+	if got := schemaRequired(t, getUserInput); !reflect.DeepEqual(got, []string{"id"}) {
+		t.Fatalf("GetUserInput required = %#v, want id only", got)
+	}
+
+	user := doc.Components.Schemas["User"]
+	assertEqual(t, schemaProperty(t, user, "name")["type"].(string), "string")
+	tags := schemaProperty(t, user, "tags")
+	assertEqual(t, tags["type"].(string), "array")
+	assertEqual(t, tags["items"].(map[string]any)["type"].(string), "string")
+}
+
+func TestRunNeoGenWritesOpenAPIFromMetadataURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/neo/_meta" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]remoteProcedureMeta{
+			{
+				Key:         "user.create",
+				Kind:        "mutation",
+				Input:       "CreateInput",
+				Output:      "User",
+				Summary:     "Create user",
+				Description: "Creates one user.",
+				Tags:        []string{"users"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	out := filepath.Join(t.TempDir(), "openapi.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := runNeoGen([]string{
+		"-dir", t.TempDir(),
+		"-metadata-url", server.URL + "/neo",
+		"-target", "openapi",
+		"-out", out,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runNeoGen returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read generated file: %v", err)
+	}
+	doc := decodeOpenAPIDocument(t, raw)
+
+	mutation := doc.Paths["/user.create"]["post"]
+	assertEqual(t, mutation.OperationID, "user_create_mutation")
+	assertEqual(t, mutation.Summary, "Create user")
+	assertEqual(t, mutation.Description, "Creates one user.")
+	if !reflect.DeepEqual(mutation.Tags, []string{"users"}) {
+		t.Fatalf("mutation tags = %#v, want users", mutation.Tags)
+	}
+	assertRequestEnvelopeInputRef(t, mutation.RequestBody, "#/components/schemas/CreateInput")
+	assertResponseEnvelopeResultRef(t, mutation.Responses["200"], "#/components/schemas/User")
+	if _, ok := doc.Components.Schemas["CreateInput"]; !ok {
+		t.Fatal("components missing CreateInput metadata-only schema")
+	}
+	if _, ok := doc.Components.Schemas["User"]; !ok {
+		t.Fatal("components missing User metadata-only schema")
+	}
+	assertContains(t, stdout.String(), "neo-gen: generated 1 typed procedures in "+out)
+}
+
 func TestGenerateTypeScriptHandlesExternalTypesAndNameCollisions(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "routes.go", `package example
@@ -771,4 +979,91 @@ func assertFileContent(t *testing.T, path string, want string) {
 	if got := string(raw); got != want {
 		t.Fatalf("%s is not current; regenerate it with neo-gen", path)
 	}
+}
+
+func decodeOpenAPIDocument(t *testing.T, src []byte) openAPITestDocument {
+	t.Helper()
+
+	var doc openAPITestDocument
+	if err := json.Unmarshal(src, &doc); err != nil {
+		t.Fatalf("decode OpenAPI document: %v\n%s", err, src)
+	}
+	return doc
+}
+
+func assertSchemaRef(t *testing.T, schema map[string]any, want string) {
+	t.Helper()
+
+	got, ok := schema["$ref"].(string)
+	if !ok || got != want {
+		t.Fatalf("schema ref = %#v, want %q", schema, want)
+	}
+}
+
+func assertRequestEnvelopeInputRef(t *testing.T, body *openAPITestRequestBody, want string) {
+	t.Helper()
+
+	if body == nil {
+		t.Fatal("requestBody = nil")
+	}
+	if !body.Required {
+		t.Fatal("requestBody required = false, want true")
+	}
+	media := body.Content["application/json"]
+	input := schemaProperty(t, media.Schema, "input")
+	assertSchemaRef(t, input, want)
+}
+
+func assertResponseEnvelopeResultRef(t *testing.T, response openAPITestResult, want string) {
+	t.Helper()
+
+	assertResponseEnvelopeResultRefForContent(t, response, "application/json", want)
+}
+
+func assertResponseEnvelopeResultRefForContent(
+	t *testing.T,
+	response openAPITestResult,
+	contentType string,
+	want string,
+) {
+	t.Helper()
+
+	media, ok := response.Content[contentType]
+	if !ok {
+		t.Fatalf("response missing %s content", contentType)
+	}
+	result := schemaProperty(t, media.Schema, "result")
+	assertSchemaRef(t, result, want)
+}
+
+func schemaProperty(t *testing.T, schema map[string]any, name string) map[string]any {
+	t.Helper()
+
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema properties = %#v", schema["properties"])
+	}
+	property, ok := properties[name].(map[string]any)
+	if !ok {
+		t.Fatalf("schema property %q = %#v", name, properties[name])
+	}
+	return property
+}
+
+func schemaRequired(t *testing.T, schema map[string]any) []string {
+	t.Helper()
+
+	raw, ok := schema["required"].([]any)
+	if !ok {
+		return nil
+	}
+	required := make([]string, 0, len(raw))
+	for _, value := range raw {
+		item, ok := value.(string)
+		if !ok {
+			t.Fatalf("required value = %#v, want string", value)
+		}
+		required = append(required, item)
+	}
+	return required
 }
