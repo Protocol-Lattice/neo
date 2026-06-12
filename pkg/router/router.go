@@ -76,6 +76,7 @@ var (
 
 	NewError          = runtime.NewError
 	Errorf            = runtime.Errorf
+	Recover           = runtime.Recover
 	WrapError         = runtime.WrapError
 	WithSummary       = runtime.WithSummary
 	WithDescription   = runtime.WithDescription

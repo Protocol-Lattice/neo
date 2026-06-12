@@ -91,6 +91,7 @@ var (
 
 	NewError          = routerpkg.NewError
 	Errorf            = routerpkg.Errorf
+	Recover           = routerpkg.Recover
 	WrapError         = routerpkg.WrapError
 	WithSummary       = routerpkg.WithSummary
 	WithDescription   = routerpkg.WithDescription
