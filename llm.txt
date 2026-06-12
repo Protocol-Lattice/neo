@@ -467,6 +467,13 @@ router.Register("hello", neo.Query(func(ctx context.Context, in HelloInput) (Hel
 Important:
 Middleware is snapshotted at registration time. Register middleware before registering procedures that should use it.
 
+Use `neo.RateLimit(limit, window)` for simple in-process fixed-window rate
+limiting. By default, buckets are per procedure kind/key. Use
+`neo.WithRateLimitKey(func(context.Context, any) string { ... })` to bucket by
+authenticated user, tenant, API key, or another application-owned value.
+Limited calls return `TOO_MANY_REQUESTS`. This limiter is local to one process;
+use a proxy, gateway, or distributed store for limits shared across instances.
+
 ## Nested routers and merging
 
 Nested routers:
@@ -590,7 +597,7 @@ Recommended production considerations:
 - Structured logging.
 - Panic recovery middleware.
 - Authentication middleware.
-- Rate limiting.
+- Rate limiting with `neo.RateLimit` for per-process limits or an external limiter for distributed deployments.
 - Distributed event broker with explicit delivery semantics.
 - Graceful shutdown.
 - Observability with metrics and tracing.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	routest "github.com/Protocol-Lattice/neo/internal/tests"
 )
@@ -236,6 +237,37 @@ func TestObserveReportsSubscriptionOpen(t *testing.T) {
 	}
 	if got.Duration <= 0 || got.Error != nil || got.Code != "" {
 		t.Fatalf("observation = %#v, want successful subscription open", got)
+	}
+}
+
+func TestRateLimitReturnsTooManyRequestsResponse(t *testing.T) {
+	router := routest.NewRouter()
+	router.Use(routest.RateLimit(1, time.Minute))
+	router.Register("limited", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "ok", nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	first := httptest.NewRecorder()
+	mux.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/neo/limited", nil))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d body=%s", first.Code, first.Body.String())
+	}
+
+	second := httptest.NewRecorder()
+	mux.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/neo/limited", nil))
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d body=%s", second.Code, second.Body.String())
+	}
+
+	var res routest.Response
+	if err := json.Unmarshal(second.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != string(routest.CodeTooManyRequests) || res.Error != "rate limit exceeded" {
+		t.Fatalf("response = %#v, want too many requests error", res)
 	}
 }
 

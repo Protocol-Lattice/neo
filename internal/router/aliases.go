@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/Protocol-Lattice/neo/internal/broker"
 	binarycodec "github.com/Protocol-Lattice/neo/internal/codec/binary"
@@ -46,10 +47,12 @@ type (
 	EventBus        = broker.EventBus
 	EventBusOptions = broker.EventBusOptions
 
-	Handler     = middleware.Handler
-	Middleware  = middleware.Middleware
-	Observation = middleware.Observation
-	Observer    = middleware.Observer
+	Handler          = middleware.Handler
+	Middleware       = middleware.Middleware
+	Observation      = middleware.Observation
+	Observer         = middleware.Observer
+	RateLimitKeyFunc = middleware.RateLimitKeyFunc
+	RateLimitOption  = middleware.RateLimitOption
 
 	Procedure[Fn, In, Out any]             = procedure.Procedure[Fn, In, Out]
 	ProcedureKind                          = procedure.ProcedureKind
@@ -132,6 +135,14 @@ func Recover() Middleware {
 
 func Observe(observer Observer) Middleware {
 	return middleware.Observe(observer)
+}
+
+func RateLimit(limit int, window time.Duration, opts ...RateLimitOption) Middleware {
+	return middleware.RateLimit(limit, window, opts...)
+}
+
+func WithRateLimitKey(key RateLimitKeyFunc) RateLimitOption {
+	return middleware.WithRateLimitKey(key)
 }
 
 func WithObservation(ctx context.Context, observation Observation) context.Context {

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	neoerrors "github.com/Protocol-Lattice/neo/internal/errors"
 	"github.com/Protocol-Lattice/neo/internal/procedure"
@@ -204,6 +205,119 @@ func TestObserveAllowsNilObserver(t *testing.T) {
 	}
 	if out != "ok" {
 		t.Fatalf("out = %v, want ok", out)
+	}
+}
+
+func TestRateLimitRejectsCallsPastLimitWithinWindow(t *testing.T) {
+	now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	handler := Apply([]Middleware{rateLimitWithClock(2, time.Minute, func() time.Time {
+		return now
+	})}, func(ctx context.Context, input any) (any, error) {
+		calls++
+		return "ok", nil
+	})
+
+	for i := 0; i < 2; i++ {
+		out, err := handler(context.Background(), nil)
+		if err != nil {
+			t.Fatalf("call %d error: %v", i+1, err)
+		}
+		if out != "ok" {
+			t.Fatalf("call %d out = %v, want ok", i+1, out)
+		}
+	}
+
+	out, err := handler(context.Background(), nil)
+	if out != nil {
+		t.Fatalf("limited output = %v, want nil", out)
+	}
+	if err == nil {
+		t.Fatal("limited error is nil, want rate limit error")
+	}
+	normalized := neoerrors.Normalize(err)
+	if normalized.Error.Code != neoerrors.CodeTooManyRequests {
+		t.Fatalf("code = %q, want %q", normalized.Error.Code, neoerrors.CodeTooManyRequests)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
+func TestRateLimitResetsAfterWindow(t *testing.T) {
+	now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	handler := Apply([]Middleware{rateLimitWithClock(1, time.Minute, func() time.Time {
+		return now
+	})}, func(ctx context.Context, input any) (any, error) {
+		return "ok", nil
+	})
+
+	if _, err := handler(context.Background(), nil); err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+	if _, err := handler(context.Background(), nil); err == nil {
+		t.Fatal("second call error is nil, want rate limit error")
+	}
+
+	now = now.Add(time.Minute)
+	out, err := handler(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("call after reset error: %v", err)
+	}
+	if out != "ok" {
+		t.Fatalf("call after reset out = %v, want ok", out)
+	}
+}
+
+func TestRateLimitDefaultsToProcedureKey(t *testing.T) {
+	now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	handler := Apply([]Middleware{rateLimitWithClock(1, time.Minute, func() time.Time {
+		return now
+	})}, func(ctx context.Context, input any) (any, error) {
+		return "ok", nil
+	})
+	first := WithObservation(context.Background(), Observation{
+		Procedure: "user.get",
+		Kind:      procedure.ProcedureKindQuery,
+	})
+	second := WithObservation(context.Background(), Observation{
+		Procedure: "user.create",
+		Kind:      procedure.ProcedureKindMutation,
+	})
+
+	if _, err := handler(first, nil); err != nil {
+		t.Fatalf("first procedure call error: %v", err)
+	}
+	if _, err := handler(second, nil); err != nil {
+		t.Fatalf("second procedure call error: %v", err)
+	}
+	if _, err := handler(first, nil); err == nil {
+		t.Fatal("repeated first procedure error is nil, want rate limit error")
+	}
+}
+
+func TestRateLimitUsesCustomKey(t *testing.T) {
+	now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+	handler := Apply([]Middleware{rateLimitWithClock(
+		1,
+		time.Minute,
+		func() time.Time { return now },
+		WithRateLimitKey(func(ctx context.Context, input any) string {
+			key, _ := input.(string)
+			return key
+		}),
+	)}, func(ctx context.Context, input any) (any, error) {
+		return "ok", nil
+	})
+
+	if _, err := handler(context.Background(), "a"); err != nil {
+		t.Fatalf("first key error: %v", err)
+	}
+	if _, err := handler(context.Background(), "b"); err != nil {
+		t.Fatalf("second key error: %v", err)
+	}
+	if _, err := handler(context.Background(), "a"); err == nil {
+		t.Fatal("repeated first key error is nil, want rate limit error")
 	}
 }
 

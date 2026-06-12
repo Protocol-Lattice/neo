@@ -49,6 +49,8 @@ type (
 	Middleware                             = runtime.Middleware
 	Observation                            = runtime.Observation
 	Observer                               = runtime.Observer
+	RateLimitKeyFunc                       = runtime.RateLimitKeyFunc
+	RateLimitOption                        = runtime.RateLimitOption
 	Procedure[Fn, In, Out any]             = runtime.Procedure[Fn, In, Out]
 	ProcedureKind                          = runtime.ProcedureKind
 	ProcedureMeta                          = runtime.ProcedureMeta
@@ -79,6 +81,7 @@ var (
 	NewError          = runtime.NewError
 	Errorf            = runtime.Errorf
 	Observe           = runtime.Observe
+	RateLimit         = runtime.RateLimit
 	Recover           = runtime.Recover
 	WrapError         = runtime.WrapError
 	WithSummary       = runtime.WithSummary
@@ -86,6 +89,7 @@ var (
 	WithTags          = runtime.WithTags
 	WithDeprecated    = runtime.WithDeprecated
 	WithProcedureMeta = runtime.WithProcedureMeta
+	WithRateLimitKey  = runtime.WithRateLimitKey
 )
 
 func New() *Router {

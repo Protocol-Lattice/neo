@@ -55,6 +55,8 @@ type (
 	Middleware                             = routerpkg.Middleware
 	Observation                            = routerpkg.Observation
 	Observer                               = routerpkg.Observer
+	RateLimitKeyFunc                       = routerpkg.RateLimitKeyFunc
+	RateLimitOption                        = routerpkg.RateLimitOption
 	Procedure[Fn, In, Out any]             = routerpkg.Procedure[Fn, In, Out]
 	ProcedureKind                          = routerpkg.ProcedureKind
 	ProcedureMeta                          = routerpkg.ProcedureMeta
@@ -94,6 +96,7 @@ var (
 	NewError          = routerpkg.NewError
 	Errorf            = routerpkg.Errorf
 	Observe           = routerpkg.Observe
+	RateLimit         = routerpkg.RateLimit
 	Recover           = routerpkg.Recover
 	WrapError         = routerpkg.WrapError
 	WithSummary       = routerpkg.WithSummary
@@ -101,6 +104,7 @@ var (
 	WithTags          = routerpkg.WithTags
 	WithDeprecated    = routerpkg.WithDeprecated
 	WithProcedureMeta = routerpkg.WithProcedureMeta
+	WithRateLimitKey  = routerpkg.WithRateLimitKey
 )
 
 func Query[In, Out any](

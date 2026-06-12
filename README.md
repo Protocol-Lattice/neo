@@ -346,6 +346,36 @@ Register recovery before the procedures it should wrap. If you use other
 middleware that can panic, place `neo.Recover()` before that middleware so it
 wraps the rest of the chain.
 
+### Rate Limiting
+
+Use `neo.RateLimit` for simple in-process fixed-window rate limiting. The
+default bucket key is the procedure kind and key, so each procedure gets its own
+limit.
+
+```go
+router := neo.NewRouter()
+router.Use(neo.RateLimit(60, time.Minute))
+```
+
+Use `neo.WithRateLimitKey` when calls should share buckets by authenticated
+user, tenant, API key, or another application-owned value already available in
+`context.Context` or the decoded input.
+
+```go
+router.Use(neo.RateLimit(
+	100,
+	time.Minute,
+	neo.WithRateLimitKey(func(ctx context.Context, input any) string {
+		userID, _ := ctx.Value(userIDKey{}).(string)
+		return userID
+	}),
+))
+```
+
+Limited calls return `TOO_MANY_REQUESTS`. `neo.RateLimit` is local to one
+process; use a reverse proxy, gateway, or distributed store when limits must be
+shared across instances.
+
 ### Procedure Observability
 
 Use `neo.Observe` to capture low-cardinality procedure signals without forcing
@@ -827,7 +857,8 @@ Recommended production concerns:
 - Reverse proxy request limits.
 - Authentication middleware.
 - Panic recovery middleware.
-- Rate limiting.
+- Rate limiting with `neo.RateLimit` for per-process limits or an external
+  limiter for distributed deployments.
 - Structured logging.
 - Metrics and tracing via `neo.Observe`.
 - Graceful shutdown.

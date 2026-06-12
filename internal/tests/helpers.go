@@ -40,6 +40,8 @@ type (
 	Middleware                             = routerruntime.Middleware
 	Observation                            = routerruntime.Observation
 	Observer                               = routerruntime.Observer
+	RateLimitKeyFunc                       = routerruntime.RateLimitKeyFunc
+	RateLimitOption                        = routerruntime.RateLimitOption
 	Procedure[Fn, In, Out any]             = routerruntime.Procedure[Fn, In, Out]
 	ProcedureMeta                          = routerruntime.ProcedureMeta
 	ProcedureOption                        = routerruntime.ProcedureOption
@@ -60,6 +62,7 @@ const (
 	CodeNotFound              = routerruntime.CodeNotFound
 	CodeMethodNotAllowed      = routerruntime.CodeMethodNotAllowed
 	CodeConflict              = routerruntime.CodeConflict
+	CodeTooManyRequests       = routerruntime.CodeTooManyRequests
 	CodeInternal              = routerruntime.CodeInternal
 	CodeNotImplemented        = routerruntime.CodeNotImplemented
 	CodeUnavailable           = routerruntime.CodeUnavailable
@@ -75,9 +78,11 @@ var (
 	NewError                  = routerruntime.NewError
 	Errorf                    = routerruntime.Errorf
 	Observe                   = routerruntime.Observe
+	RateLimit                 = routerruntime.RateLimit
 	Recover                   = routerruntime.Recover
 	WrapError                 = routerruntime.WrapError
 	ServerOptionsWithDefaults = routerruntime.ServerOptionsWithDefaults
+	WithRateLimitKey          = routerruntime.WithRateLimitKey
 )
 
 func Query[In, Out any](
