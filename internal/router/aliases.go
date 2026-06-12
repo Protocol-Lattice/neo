@@ -124,6 +124,10 @@ func applyMiddlewares(middlewares []Middleware, handler Handler) Handler {
 	return middleware.Apply(middlewares, handler)
 }
 
+func Recover() Middleware {
+	return middleware.Recover()
+}
+
 func cloneMiddlewares(middlewares []Middleware) []Middleware {
 	return middleware.Clone(middlewares)
 }

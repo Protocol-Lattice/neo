@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,35 @@ func TestApplyMiddlewaresPropagatesErrors(t *testing.T) {
 	handler := Apply([]Middleware{middleware}, func(ctx context.Context, input any) (any, error) {
 		t.Fatal("handler should not be called")
 		return nil, nil
+	})
+
+	_, err := handler(context.Background(), nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRecoverConvertsPanicToError(t *testing.T) {
+	handler := Apply([]Middleware{Recover()}, func(ctx context.Context, input any) (any, error) {
+		panic("boom")
+	})
+
+	got, err := handler(context.Background(), nil)
+	if err == nil {
+		t.Fatal("error is nil, want panic recovery error")
+	}
+	if got != nil {
+		t.Fatalf("result = %v, want nil", got)
+	}
+	if !strings.Contains(err.Error(), "panic recovered: boom") {
+		t.Fatalf("error = %v, want recovered panic detail", err)
+	}
+}
+
+func TestRecoverPreservesReturnedError(t *testing.T) {
+	wantErr := errors.New("handler failed")
+	handler := Apply([]Middleware{Recover()}, func(ctx context.Context, input any) (any, error) {
+		return nil, wantErr
 	})
 
 	_, err := handler(context.Background(), nil)

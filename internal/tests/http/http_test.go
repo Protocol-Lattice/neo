@@ -42,6 +42,66 @@ func TestPlainErrorDefaultsToInternalAndRedactsMessage(t *testing.T) {
 	}
 }
 
+func TestRecoverMiddlewareRedactsPanickedQuery(t *testing.T) {
+	router := routest.NewRouter()
+	router.Use(routest.Recover())
+	router.Register("boom", routest.Query(func(context.Context, struct{}) (string, error) {
+		panic("secret token leaked in panic")
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/neo/boom", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(rec.Body.String(), "secret token") {
+		t.Fatalf("panic detail leaked: %s", rec.Body.String())
+	}
+
+	var res routest.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != string(routest.CodeInternal) || res.Error != routest.InternalErrorMessage {
+		t.Fatalf("response = %#v, want redacted internal error", res)
+	}
+}
+
+func TestRecoverMiddlewareRedactsPanickedSubscriptionOpen(t *testing.T) {
+	router := routest.NewRouter()
+	router.Use(routest.Recover())
+	router.RegisterSubscription("events", routest.Subscription(func(context.Context, struct{}) (<-chan string, error) {
+		panic("secret stream panic")
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/neo/events", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if strings.Contains(rec.Body.String(), "secret stream panic") {
+		t.Fatalf("panic detail leaked: %s", rec.Body.String())
+	}
+
+	var res routest.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Code != string(routest.CodeInternal) || res.Error != routest.InternalErrorMessage {
+		t.Fatalf("response = %#v, want redacted internal error", res)
+	}
+}
+
 func TestExplicitErrorMessagePassesThroughForNonInternalCode(t *testing.T) {
 	router := routest.NewRouter()
 	router.Register("missing", routest.Query(func(context.Context, struct{}) (string, error) {

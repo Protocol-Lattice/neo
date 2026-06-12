@@ -71,6 +71,7 @@ var (
 	NewRouter                 = routerruntime.NewRouter
 	NewError                  = routerruntime.NewError
 	Errorf                    = routerruntime.Errorf
+	Recover                   = routerruntime.Recover
 	WrapError                 = routerruntime.WrapError
 	ServerOptionsWithDefaults = routerruntime.ServerOptionsWithDefaults
 )

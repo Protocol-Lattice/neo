@@ -330,6 +330,22 @@ is registered does not retroactively wrap that procedure. For scoped middleware,
 build a sub-router, call `Use` on it, register procedures into it, then attach
 it with `Nested` or `Merge`.
 
+### Panic Recovery
+
+Use `neo.Recover()` to convert panics from procedure handlers into redacted
+`INTERNAL` responses. Panic details are logged through Neo's internal error
+logger, but clients receive the same safe internal error body used for plain Go
+errors.
+
+```go
+router := neo.NewRouter()
+router.Use(neo.Recover())
+```
+
+Register recovery before the procedures it should wrap. If you use other
+middleware that can panic, place `neo.Recover()` before that middleware so it
+wraps the rest of the chain.
+
 ### Authentication Example
 
 ```go
