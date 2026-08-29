@@ -11,6 +11,7 @@ import (
 const (
 	BinaryContentType = binarycodec.ContentType
 	MetadataPath      = "_meta"
+	BatchPath         = "_batch"
 
 	CodeBadRequest       = neoerrors.CodeBadRequest
 	CodeUnauthorized     = neoerrors.CodeUnauthorized

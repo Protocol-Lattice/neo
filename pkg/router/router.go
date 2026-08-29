@@ -13,6 +13,7 @@ const (
 	DefaultMaxRequestBody           = runtime.DefaultMaxRequestBody
 	DefaultEventBusSubscriberBuffer = runtime.DefaultEventBusSubscriberBuffer
 	MetadataPath                    = runtime.MetadataPath
+	BatchPath                       = runtime.BatchPath
 	GatewayHealthPath               = gatewayruntime.GatewayHealthPath
 	BinaryContentType               = runtime.BinaryContentType
 

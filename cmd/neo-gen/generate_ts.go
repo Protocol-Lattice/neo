@@ -43,9 +43,9 @@ func generateTypeScriptRuntime() ([]byte, error) {
 
 func writeTypeScriptRuntimeImport(b *bytes.Buffer, runtimeImport string) {
 	quoted := strconv.Quote(runtimeImport)
-	fmt.Fprintf(b, "import { NeoClientCore, type NeoCallOptions, type NeoClientOptions } from %s;\n", quoted)
+	fmt.Fprintf(b, "import { NeoClientCore, type NeoBatchCall, type NeoCallOptions, type NeoClientOptions } from %s;\n", quoted)
 	fmt.Fprintf(b, "export { NeoError } from %s;\n", quoted)
-	fmt.Fprintf(b, "export type { NeoCallOptions, NeoClientOptions, NeoHeaders, NeoProcedureMeta } from %s;\n\n", quoted)
+	fmt.Fprintf(b, "export type { NeoBatchCall, NeoBatchResult, NeoCallOptions, NeoClientOptions, NeoHeaders, NeoProcedureMeta } from %s;\n\n", quoted)
 }
 
 func writeTypeScriptRuntime(b *bytes.Buffer) {
@@ -108,6 +108,26 @@ type NeoResponse<T> = {
   result?: T;
   code?: string;
   error?: string;
+};
+
+export type NeoBatchCall<Out = unknown> = {
+  key: string;
+  input?: unknown;
+  readonly __neoOutput?: Out;
+};
+
+export type NeoBatchResult<Out = unknown> = {
+  result?: Out;
+  code?: string;
+  error?: string;
+};
+
+type NeoBatchResults<Calls extends readonly NeoBatchCall<unknown>[]> = {
+  [Index in keyof Calls]: Calls[Index] extends NeoBatchCall<infer Out> ? NeoBatchResult<Out> : never;
+};
+
+type NeoBatchResponse = {
+  results?: NeoBatchResult<unknown>[];
 };
 
 export type NeoProcedureMeta = {
@@ -478,6 +498,38 @@ func writeTypeScriptTransportMethods(b *bytes.Buffer) {
     return payload.result as Out;
   }
 
+  async batch<Calls extends readonly NeoBatchCall<unknown>[]>(
+    calls: Calls,
+    options: NeoCallOptions = {},
+  ): Promise<NeoBatchResults<Calls>> {
+    const body = JSON.stringify({
+      calls: calls.map(({ key, input }) => ({ key, input })),
+    });
+    if (body === undefined) {
+      throw new Error("Neo batch calls must be JSON serializable");
+    }
+
+    const response = await this.fetchFn(this.urlFor("_batch"), {
+      method: "POST",
+      headers: this.mergeHeaders(options.headers),
+      body,
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      const payload = await this.readResponse<unknown>(response);
+      throw this.toError(payload, response.status);
+    }
+
+    const payload = await this.readBatchResponse(response);
+    if (!Array.isArray(payload.results)) {
+      throw new Error("Neo batch response was not valid JSON");
+    }
+    if (payload.results.length !== calls.length) {
+      throw new Error("Neo batch response result count did not match calls");
+    }
+    return payload.results as NeoBatchResults<Calls>;
+  }
+
   async metadata(options: NeoCallOptions = {}): Promise<NeoProcedureMeta[]> {
     const response = await this.fetchFn(this.urlFor("_meta"), {
       method: "GET",
@@ -696,6 +748,15 @@ func writeTypeScriptTransportMethods(b *bytes.Buffer) {
     }
   }
 
+  private async readBatchResponse(response: NeoFetchResponse): Promise<NeoBatchResponse> {
+    const text = await response.text();
+    try {
+      return JSON.parse(text) as NeoBatchResponse;
+    } catch {
+      throw new Error("Neo batch response was not valid JSON");
+    }
+  }
+
   private decodeStreamLine<Out>(line: string): { hasValue: boolean; value: Out } {
     const trimmed = line.trim();
     if (trimmed === "") {
@@ -735,12 +796,18 @@ func writeTypeScriptProcedureType(b *bytes.Buffer, p procedure, typeName string)
 		fmt.Fprintf(b, "  call(input: %s, options?: NeoCallOptions): Promise<%s> {\n", input, output)
 		fmt.Fprintf(b, "    return this.client.request<%s, %s>(\"GET\", %q, input, options);\n", input, output, p.Key)
 		b.WriteString("  }\n")
+		fmt.Fprintf(b, "\n  toBatchCall(input: %s): NeoBatchCall<%s> {\n", input, output)
+		fmt.Fprintf(b, "    return { key: %q, input };\n", p.Key)
+		b.WriteString("  }\n")
 	case "mutation":
 		fmt.Fprintf(b, "  mutate(input: %s, options?: NeoCallOptions): Promise<%s> {\n", input, output)
 		b.WriteString("    return this.call(input, options);\n")
 		b.WriteString("  }\n\n")
 		fmt.Fprintf(b, "  call(input: %s, options?: NeoCallOptions): Promise<%s> {\n", input, output)
 		fmt.Fprintf(b, "    return this.client.request<%s, %s>(\"POST\", %q, input, options);\n", input, output, p.Key)
+		b.WriteString("  }\n")
+		fmt.Fprintf(b, "\n  toBatchCall(input: %s): NeoBatchCall<%s> {\n", input, output)
+		fmt.Fprintf(b, "    return { key: %q, input };\n", p.Key)
 		b.WriteString("  }\n")
 	case "subscription":
 		fmt.Fprintf(b, "  subscribe(input: %s, options?: NeoCallOptions): AsyncIterable<%s> {\n", input, output)

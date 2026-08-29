@@ -323,6 +323,165 @@ func TestQueryAcceptsPostBodyForLargeInputs(t *testing.T) {
 	}
 }
 
+func TestBatchCallsPreserveOrderAndIsolateProcedureErrors(t *testing.T) {
+	type batchResponse struct {
+		Results []routest.Response `json:"results"`
+	}
+
+	router := routest.NewRouter()
+	router.Register("hello", routest.Query(func(_ context.Context, in routest.Input) (routest.Output, error) {
+		return routest.Output{Message: "hello " + in.Name}, nil
+	}))
+	router.Register("create", routest.Mutation(func(_ context.Context, in routest.Input) (routest.Output, error) {
+		return routest.Output{Message: "created " + in.Name}, nil
+	}))
+	router.Register("broken", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "", errors.New("database password leaked")
+	}))
+	router.RegisterSubscription("events", routest.Subscription(func(context.Context, struct{}) (<-chan string, error) {
+		return nil, nil
+	}))
+
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/neo/_batch", strings.NewReader(`{
+  "calls": [
+    {"key":"hello","input":{"name":"Ada"}},
+    {"key":"missing","input":{}},
+    {"key":"create","input":{"name":"Neo"}},
+    {"key":"broken","input":{}},
+    {"key":"events","input":{}}
+  ]
+}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var response batchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if len(response.Results) != 5 {
+		t.Fatalf("results = %#v, want five", response.Results)
+	}
+	if got := response.Results[0].Result.(map[string]any)["message"]; got != "hello Ada" {
+		t.Fatalf("first result = %#v, want hello Ada", response.Results[0])
+	}
+	if response.Results[1].Code != string(routest.CodeNotFound) {
+		t.Fatalf("second result = %#v, want not found", response.Results[1])
+	}
+	if got := response.Results[2].Result.(map[string]any)["message"]; got != "created Neo" {
+		t.Fatalf("third result = %#v, want created Neo", response.Results[2])
+	}
+	if response.Results[3].Code != string(routest.CodeInternal) || response.Results[3].Error != routest.InternalErrorMessage {
+		t.Fatalf("fourth result = %#v, want redacted internal error", response.Results[3])
+	}
+	if strings.Contains(response.Results[3].Error, "password") {
+		t.Fatalf("batch result leaked internal error: %#v", response.Results[3])
+	}
+	if response.Results[4].Code != string(routest.CodeMethodNotAllowed) {
+		t.Fatalf("fifth result = %#v, want subscription error", response.Results[4])
+	}
+}
+
+func TestBatchRejectsInvalidRequests(t *testing.T) {
+	type errorResponse struct {
+		Code string `json:"code"`
+	}
+
+	router := routest.NewRouter()
+	router.Register("hello", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "hello", nil
+	}))
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	tests := []struct {
+		name        string
+		method      string
+		contentType string
+		body        string
+		status      int
+		code        routest.ErrorCode
+	}{
+		{name: "wrong method", method: http.MethodGet, status: http.StatusMethodNotAllowed, code: routest.CodeMethodNotAllowed},
+		{name: "malformed body", method: http.MethodPost, contentType: "application/json", body: `{"calls":`, status: http.StatusBadRequest, code: routest.CodeBadRequest},
+		{name: "missing calls", method: http.MethodPost, contentType: "application/json", body: `{}`, status: http.StatusBadRequest, code: routest.CodeBadRequest},
+		{name: "wrong content type", method: http.MethodPost, contentType: "application/x-neo-bin", body: `{"calls":[]}`, status: http.StatusBadRequest, code: routest.CodeBadRequest},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(test.method, "/neo/_batch", strings.NewReader(test.body))
+			if test.contentType != "" {
+				req.Header.Set("Content-Type", test.contentType)
+			}
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != test.status {
+				t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), test.status)
+			}
+			var response errorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if response.Code != string(test.code) {
+				t.Fatalf("code = %q, want %q", response.Code, test.code)
+			}
+		})
+	}
+}
+
+func TestBatchPreservesZeroValueResults(t *testing.T) {
+	type batchResponse struct {
+		Results []struct {
+			Result json.RawMessage `json:"result"`
+		} `json:"results"`
+	}
+
+	router := routest.NewRouter()
+	router.Register("false", routest.Query(func(context.Context, struct{}) (bool, error) {
+		return false, nil
+	}))
+	router.Register("zero", routest.Query(func(context.Context, struct{}) (int, error) {
+		return 0, nil
+	}))
+	router.Register("empty", routest.Query(func(context.Context, struct{}) (string, error) {
+		return "", nil
+	}))
+	mux := http.NewServeMux()
+	router.ServeHTTP(mux, "/neo/")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/neo/_batch", strings.NewReader(`{
+  "calls": [{"key":"false"}, {"key":"zero"}, {"key":"empty"}]
+}`))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response batchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if len(response.Results) != 3 {
+		t.Fatalf("results = %#v, want three", response.Results)
+	}
+	got := []string{string(response.Results[0].Result), string(response.Results[1].Result), string(response.Results[2].Result)}
+	want := []string{"false", "0", `""`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("results = %#v, want %#v", got, want)
+	}
+}
+
 func TestMethodEnforcement(t *testing.T) {
 	router := routest.NewRouter()
 	router.Register("q", routest.Query[routest.Input, routest.Output](func(ctx context.Context, in routest.Input) (routest.Output, error) {

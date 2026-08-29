@@ -174,6 +174,11 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 func writeProcedureError(w http.ResponseWriter, err error) {
+	status, response := procedureErrorResponse(err)
+	writeJSON(w, status, response)
+}
+
+func procedureErrorResponse(err error) (int, Response) {
 	n := neoerrors.Normalize(err)
 	e := n.Error
 	message := e.Message
@@ -187,7 +192,7 @@ func writeProcedureError(w http.ResponseWriter, err error) {
 		message = e.Code.DefaultMessage()
 	}
 
-	writeJSON(w, e.Code.HTTPStatus(), Response{Code: string(e.Code), Error: message})
+	return e.Code.HTTPStatus(), Response{Code: string(e.Code), Error: message}
 }
 
 func responseError(res Response) error {

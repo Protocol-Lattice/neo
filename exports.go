@@ -13,6 +13,7 @@ const (
 	DefaultMaxRequestBody           = routerpkg.DefaultMaxRequestBody
 	DefaultEventBusSubscriberBuffer = routerpkg.DefaultEventBusSubscriberBuffer
 	MetadataPath                    = routerpkg.MetadataPath
+	BatchPath                       = routerpkg.BatchPath
 	GatewayHealthPath               = routerpkg.GatewayHealthPath
 	BinaryContentType               = routerpkg.BinaryContentType
 
@@ -40,6 +41,8 @@ type (
 	ClientNamespace = clientpkg.ClientNamespace
 	ClientOption    = clientpkg.ClientOption
 	ClientProcedure = clientpkg.ClientProcedure
+	BatchCall       = clientpkg.BatchCall
+	BatchResult     = clientpkg.BatchResult
 	Request         = clientpkg.Request
 	Response        = clientpkg.Response
 
@@ -134,6 +137,10 @@ func CallTyped[In, Out any](
 	input In,
 ) (Out, error) {
 	return clientpkg.CallTyped[In, Out](ctx, procedure, input)
+}
+
+func DecodeBatchResult[Out any](result BatchResult) (Out, error) {
+	return clientpkg.DecodeBatchResult[Out](result)
 }
 
 func SubscribeTyped[In, Out any](

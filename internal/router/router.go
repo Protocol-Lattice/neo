@@ -318,6 +318,10 @@ func (router *Router) HTTPHandler(prefix string) http.Handler {
 			serveProcedureMetadata(w, r, router.Metadata())
 			return
 		}
+		if key == BatchPath {
+			router.serveBatch(w, r)
+			return
+		}
 
 		if subscription := router.subscriptions[key]; subscription != nil {
 			router.serveSubscription(w, r, key, subscription)

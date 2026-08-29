@@ -21,6 +21,7 @@ interfaces, channels, and HTTP middleware.
 - [Install](#install)
 - [Quick Start](#quick-start)
 - [Client Calls](#client-calls)
+- [Batch Calls](#batch-calls)
 - [Core Concepts](#core-concepts)
 - [Subscriptions](#subscriptions)
 - [Middleware](#middleware)
@@ -128,6 +129,45 @@ if err != nil {
 }
 
 fmt.Println(out.Message)
+```
+
+### Batch Calls
+
+Batching combines multiple unary calls into one JSON `POST` request. Calls run
+in order and every result stays at the matching index. A procedure error affects
+only its own result; malformed batch requests and network errors are returned by
+`Batch` itself. Queries and mutations are supported. Subscriptions are not.
+
+```go
+results, err := client.Batch(ctx,
+	neo.BatchCall{
+		Procedure: client.Query.Procedure("user.get"),
+		Input:     GetUserInput{ID: 1},
+	},
+	neo.BatchCall{
+		Procedure: client.Mutation.Procedure("user.create"),
+		Input:     CreateUserInput{Name: "Kamil"},
+	},
+)
+if err != nil {
+	return err // transport or malformed batch response
+}
+
+user, err := neo.DecodeBatchResult[User](results[0])
+if err != nil {
+	return err // procedure error for user.get
+}
+```
+
+Generated TypeScript procedures expose `toBatchCall`, while `client.batch`
+returns a tuple of typed result envelopes. Check each envelope's `code` or
+`error` before using `result`.
+
+```ts
+const [user, created] = await client.batch([
+  client.user.get.toBatchCall({ id: 1 }),
+  client.user.create.toBatchCall({ name: "Kamil" }),
+] as const);
 ```
 
 For Go-to-Go unary calls, clients can opt into Neo's compact binary envelope:
@@ -733,6 +773,18 @@ Content-Type: application/json
 ```
 
 ```http
+POST /neo/_batch
+Content-Type: application/json
+
+{
+  "calls": [
+    {"key": "user.get", "input": {"id": 1}},
+    {"key": "user.create", "input": {"name": "Kamil"}}
+  ]
+}
+```
+
+```http
 GET /neo/events.feed
 Accept: application/x-ndjson
 ```
@@ -765,6 +817,21 @@ Error:
   "error": "procedure not found"
 }
 ```
+
+Batch responses are always `200 OK` once the request envelope is valid. Each
+item is a normal result or error envelope in request order:
+
+```json
+{
+  "results": [
+    {"result": {"id": 1, "name": "Kamil"}},
+    {"code": "BAD_REQUEST", "error": "name is required"}
+  ]
+}
+```
+
+Batching is JSON-only, shares the normal request-body limit, runs calls
+sequentially, and does not support subscriptions.
 
 Subscription streams send one envelope per event. NDJSON sends one JSON object
 per line; WebSocket subscriptions send the same envelopes as text frames.

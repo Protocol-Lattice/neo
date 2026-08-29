@@ -619,15 +619,17 @@ func register(root, user Router) {
 		t.Fatalf("generated source should not include json-ignored field\n--- source ---\n%s", text)
 	}
 	assertContains(t, text, "attributes: Record<string, unknown>;")
-	assertContains(t, text, `import { NeoClientCore, type NeoCallOptions, type NeoClientOptions } from "./neo.runtime.ts";`)
+	assertContains(t, text, `import { NeoClientCore, type NeoBatchCall, type NeoCallOptions, type NeoClientOptions } from "./neo.runtime.ts";`)
 	assertContains(t, text, `export { NeoError } from "./neo.runtime.ts";`)
 	assertContains(t, text, "export class TypedClient extends NeoClientCore {")
 	assertContains(t, text, "readonly user: UserClient;")
 	assertContains(t, text, "readonly health: HealthProcedure;")
 	assertContains(t, text, "export function createClient(addr: string, options?: NeoClientOptions): TypedClient")
 	assertContains(t, text, `return this.client.request<NoInput, User>("GET", "health", input, options);`)
+	assertContains(t, text, `toBatchCall(input: NoInput): NeoBatchCall<User>`)
 	assertContains(t, text, `return this.client.request<Record<string, never>, User[]>("GET", "inline", input, options);`)
 	assertContains(t, text, `return this.client.request<CreateInput, User>("POST", "user.create", input, options);`)
+	assertContains(t, text, `toBatchCall(input: CreateInput): NeoBatchCall<User>`)
 	assertContains(t, text, `return this.client.subscribe<NoInput, User>("user.changes", input, options);`)
 	assertContains(t, text, `return this.client.subscribeWebSocket<NoInput, User>("user.changes", input, options);`)
 }

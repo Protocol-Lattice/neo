@@ -8,6 +8,7 @@ import (
 
 const (
 	BinaryContentType = runtime.BinaryContentType
+	BatchPath         = runtime.BatchPath
 
 	CodeBadRequest       = runtime.CodeBadRequest
 	CodeUnauthorized     = runtime.CodeUnauthorized
@@ -31,6 +32,8 @@ type (
 	ClientNamespace = runtime.ClientNamespace
 	ClientOption    = runtime.ClientOption
 	ClientProcedure = runtime.ClientProcedure
+	BatchCall       = runtime.BatchCall
+	BatchResult     = runtime.BatchResult
 	Error           = runtime.Error
 	ErrorCode       = runtime.ErrorCode
 	ProcedureKind   = runtime.ProcedureKind
@@ -57,6 +60,10 @@ func CallTyped[In, Out any](
 	input In,
 ) (Out, error) {
 	return runtime.CallTyped[In, Out](ctx, procedure, input)
+}
+
+func DecodeBatchResult[Out any](result BatchResult) (Out, error) {
+	return runtime.DecodeBatchResult[Out](result)
 }
 
 func SubscribeTyped[In, Out any](

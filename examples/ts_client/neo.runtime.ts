@@ -61,6 +61,26 @@ type NeoResponse<T> = {
   error?: string;
 };
 
+export type NeoBatchCall<Out = unknown> = {
+  key: string;
+  input?: unknown;
+  readonly __neoOutput?: Out;
+};
+
+export type NeoBatchResult<Out = unknown> = {
+  result?: Out;
+  code?: string;
+  error?: string;
+};
+
+type NeoBatchResults<Calls extends readonly NeoBatchCall<unknown>[]> = {
+  [Index in keyof Calls]: Calls[Index] extends NeoBatchCall<infer Out> ? NeoBatchResult<Out> : never;
+};
+
+type NeoBatchResponse = {
+  results?: NeoBatchResult<unknown>[];
+};
+
 export type NeoProcedureMeta = {
   key: string;
   kind: "query" | "mutation" | "subscription" | string;
@@ -147,6 +167,38 @@ export class NeoClientCore {
       throw this.toError(payload, response.status);
     }
     return payload.result as Out;
+  }
+
+  async batch<Calls extends readonly NeoBatchCall<unknown>[]>(
+    calls: Calls,
+    options: NeoCallOptions = {},
+  ): Promise<NeoBatchResults<Calls>> {
+    const body = JSON.stringify({
+      calls: calls.map(({ key, input }) => ({ key, input })),
+    });
+    if (body === undefined) {
+      throw new Error("Neo batch calls must be JSON serializable");
+    }
+
+    const response = await this.fetchFn(this.urlFor("_batch"), {
+      method: "POST",
+      headers: this.mergeHeaders(options.headers),
+      body,
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      const payload = await this.readResponse<unknown>(response);
+      throw this.toError(payload, response.status);
+    }
+
+    const payload = await this.readBatchResponse(response);
+    if (!Array.isArray(payload.results)) {
+      throw new Error("Neo batch response was not valid JSON");
+    }
+    if (payload.results.length !== calls.length) {
+      throw new Error("Neo batch response result count did not match calls");
+    }
+    return payload.results as NeoBatchResults<Calls>;
   }
 
   async metadata(options: NeoCallOptions = {}): Promise<NeoProcedureMeta[]> {
@@ -364,6 +416,15 @@ export class NeoClientCore {
       return JSON.parse(text) as NeoResponse<Out>;
     } catch {
       throw new Error("Neo response was not valid JSON");
+    }
+  }
+
+  private async readBatchResponse(response: NeoFetchResponse): Promise<NeoBatchResponse> {
+    const text = await response.text();
+    try {
+      return JSON.parse(text) as NeoBatchResponse;
+    } catch {
+      throw new Error("Neo batch response was not valid JSON");
     }
   }
 
